@@ -78,6 +78,15 @@
           export XKB_CONFIG_ROOT=${pkgs.xkeyboard-config}/share/X11/xkb
           exec "$@"
         '';
+
+      # hermetic Gradle builds (nix/gradle.nix): backend, frontend-web, velocity-example-plugin, libs
+      gradleFor =
+        pkgs:
+        pkgs.callPackage ./nix/gradle.nix {
+          jdk = jdkFor pkgs;
+          postgresql = postgresFor pkgs;
+          egglogWasm = egglogWasmFor pkgs;
+        };
     in
     {
       devShells = forAllSystems (
@@ -136,8 +145,16 @@
         pkgs:
         let
           jre = jreFor pkgs;
+          gradle = gradleFor pkgs;
         in
         {
+          inherit (gradle)
+            backend
+            frontend-web
+            velocity-example-plugin
+            libs
+            ;
+
           postgresql = postgresFor pkgs;
 
           egglog-wasm = egglogWasmFor pkgs;
@@ -194,6 +211,19 @@
           };
         }
       );
+
+      # `gradlew build` (all unit and integration tests) in the Nix sandbox
+      checks = forAllSystems (pkgs: {
+        gradle = (gradleFor pkgs).check;
+      });
+
+      # nix run .#update-gradle-deps: re-records nix/gradle-deps.json (run in the repository root)
+      apps = forAllSystems (pkgs: {
+        update-gradle-deps = {
+          type = "app";
+          program = "${(gradleFor pkgs).mitmCache.updateScript}";
+        };
+      });
 
       formatter = forAllSystems (pkgs: pkgs.nixfmt-rfc-style);
     };
