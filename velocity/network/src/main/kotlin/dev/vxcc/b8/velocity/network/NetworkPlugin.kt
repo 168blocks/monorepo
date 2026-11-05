@@ -10,6 +10,7 @@ import com.velocitypowered.api.event.Subscribe
 import com.velocitypowered.api.event.connection.DisconnectEvent
 import com.velocitypowered.api.event.connection.LoginEvent
 import com.velocitypowered.api.event.connection.PreLoginEvent
+import com.velocitypowered.api.event.player.KickedFromServerEvent
 import com.velocitypowered.api.event.player.ServerConnectedEvent
 import com.velocitypowered.api.event.proxy.ProxyInitializeEvent
 import com.velocitypowered.api.event.proxy.ProxyPingEvent
@@ -35,6 +36,8 @@ import java.util.concurrent.TimeUnit
  * - **cross-edge actions** over LISTEN/NOTIFY ([NetworkMessage]): a login kicks the player's older session
  *   on any edge; `/network kick|ban|send|broadcast|staff|drain|undrain` reach the edge that has the player.
  * - **drain**: the edge stops taking logins and transfers its players (transfer packets) to another edge.
+ * - **no failover mid-connection**: a server that fails a player while connecting disconnects them with
+ *   a readable message instead of redirecting a client that is still configuring ([ConfigurationFailover]).
  * - **maintenance**: without the database (no tunnel to the core, schema missing) the edge answers pings
  *   with "maintenance" and refuses logins.
  *
@@ -199,6 +202,16 @@ class NetworkPlugin @Inject constructor(
         val s = store ?: return
         val session = sessions[event.player] ?: return
         async { s.setServer(event.player.uniqueId, session, event.server.serverInfo.name) }
+    }
+
+    /** no fallback in the middle of a server connection (#56, [ConfigurationFailover]) */
+    @Subscribe(order = PostOrder.LAST)
+    fun onKickedFromServer(event: KickedFromServerEvent) {
+        val replaced = ConfigurationFailover.decide(
+            event.kickedDuringServerConnect(), event.result, event.server.serverInfo.name, event.serverKickReason.orElse(null),
+        ) ?: return
+        logger.info("{} failed connecting to {}: disconnecting instead of failing over", event.player.username, event.server.serverInfo.name)
+        event.result = replaced
     }
 
     @Subscribe(order = PostOrder.LAST)
