@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit
  * provides them, with pg_jsonschema, see flake.nix). One server per test JVM, started on first use and
  * stopped when the JVM exits.
  *
- * Set `PGECS_TEST_URL` (with `PGECS_TEST_USER`, `PGECS_TEST_PASSWORD`) to use an existing server
+ * Set `PGECS_TEST_URL` (with `PGECS_TEST_USER`) to use an existing server
  * instead.
  */
 object TestPostgres {
@@ -23,7 +23,6 @@ object TestPostgres {
     private fun external(url: String) = PgEcsConfig(
         jdbcUrl = url,
         user = System.getenv("PGECS_TEST_USER") ?: USER,
-        password = System.getenv("PGECS_TEST_PASSWORD") ?: "",
     )
 
     private fun start(): PgEcsConfig {
@@ -44,7 +43,7 @@ object TestPostgres {
             dir.toFile().deleteRecursively()
         })
         awaitPort(port, server, dir)
-        return PgEcsConfig("jdbc:postgresql://127.0.0.1:$port/$DATABASE", USER, "")
+        return PgEcsConfig("jdbc:postgresql://127.0.0.1:$port/$DATABASE", USER)
     }
 
     /**

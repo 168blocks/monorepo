@@ -6,6 +6,7 @@
 #   tools/network.sh down [-v]            stop (-v also deletes the database and S3 volumes)
 #   tools/network.sh logs [service]
 #   tools/network.sh ps
+#   tools/network.sh psql [args]          psql as postgres inside the database container
 #   tools/network.sh env                  this checkout's instance slot, ports, compose project
 #   tools/network.sh instances            all checkouts' slots on this machine
 #
@@ -77,5 +78,7 @@ case "$cmd" in
     ;;
   logs) compose logs "$@" ;;
   ps) compose ps ;;
+  psql) # psql as the postgres superuser inside the database container (peer auth, no password)
+    exec podman exec -it "${BLOCKS_COMPOSE_PROJECT}_postgres_1" psql -h /run/postgresql -U postgres -d blocks "$@" ;;
   *) sed -n '2,18p' "$0"; exit 2 ;;
 esac
