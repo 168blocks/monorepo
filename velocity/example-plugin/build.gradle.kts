@@ -5,6 +5,5 @@ plugins {
 description = "Example Velocity plugin (Kotlin)"
 
 dependencies {
-    implementation(project(":libs:common"))
     implementation(project(":libs:pgecs"))
 }

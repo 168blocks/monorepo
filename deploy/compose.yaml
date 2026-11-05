@@ -105,7 +105,7 @@ services:
     <<: *jvm
     network_mode: service:core
     # straight to the JVM (the installDist start script needs a full POSIX userland)
-    command: ["java", "-cp", "lib/*", "net.blocks168.backend.MainKt"]
+    command: ["java", "-cp", "lib/*", "dev.vxcc.b8.backend.MainKt"]
     environment:
       <<: *core-env
       BLOCKS_HTTP_PORT: "8080"

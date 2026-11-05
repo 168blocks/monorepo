@@ -126,7 +126,6 @@ PaperMC, Fabric meta and Modrinth. Details: issue #8.
 | `libs/pgecs-ir` | First-level query IR of pgecs: what the DSL and lambda decompiler produce, what the planner and SQL compiler consume, and the plan-cache key |
 | `libs/pgecs-eqsat` | Equality saturation for the pgecs planner: egglog (Rust, `egglog-wasi/`) built to wasm32-wasip1 by Nix (`nix/egglog-wasm.nix`), compiled to JVM classes by Endive at build time |
 | `libs/static-guard` | Finds, traces (`-javaagent`) and contains static state shared by instances co-hosted in one JVM (creative host, #6); findings in `docs/co-hosting.md` |
-| `libs/common` | JVM code shared by server-side components; CBOR via tinyjcbor (`ServerHello`) |
 | `libs/b8-util` | b8 modules on pgecs systems: expiry (`b8:util:expires-slow:v1`, `Expiry.install`) |
 | `libs/api` | Kotlin Multiplatform (JVM + Wasm) backend API model, shared with the frontend |
 | `backend/` | Ktor backend; serves the API and the web frontend |

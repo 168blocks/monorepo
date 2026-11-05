@@ -7,7 +7,7 @@ plugins {
 description = "static-guard: finds and contains static (process-global) state shared by instances co-hosted in one JVM"
 
 application {
-    mainClass.set("net.blocks168.staticguard.scan.MainKt")
+    mainClass.set("dev.vxcc.b8.staticguard.scan.MainKt")
 }
 
 // The agent is plain Java with no dependencies: it is loaded into the system class loader of a foreign
@@ -16,11 +16,11 @@ val agentJar = tasks.register<Jar>("agentJar") {
     group = "build"
     description = "Java agent jar (-javaagent:...): runtime tracing and per-tenant statics"
     archiveClassifier.set("agent")
-    from(sourceSets.main.get().output) { include("net/blocks168/staticguard/agent/**") }
+    from(sourceSets.main.get().output) { include("dev/vxcc/b8/staticguard/agent/**") }
     manifest {
         attributes(
-            "Premain-Class" to "net.blocks168.staticguard.agent.StaticGuardAgent",
-            "Agent-Class" to "net.blocks168.staticguard.agent.StaticGuardAgent",
+            "Premain-Class" to "dev.vxcc.b8.staticguard.agent.StaticGuardAgent",
+            "Agent-Class" to "dev.vxcc.b8.staticguard.agent.StaticGuardAgent",
         )
     }
 }

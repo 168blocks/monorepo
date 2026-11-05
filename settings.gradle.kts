@@ -19,7 +19,6 @@ include(":libs:pgecs-lambda") // bytecode decompiler for pgecs query lambdas (wh
 include(":libs:pgecs-query") // pgecs query engine: planner, eqsat optimisation, SQL compiler, plan cache
 include(":libs:static-guard") // finds and contains static state shared by instances co-hosted in one JVM (#6)
 include(":libs:b8-util") // b8 modules on pgecs systems: expiry
-include(":libs:common") // JVM code shared by all server-side components (CBOR wire format, ...)
 include(":libs:api") // Kotlin Multiplatform backend API model, shared with the frontend
 
 // Services
