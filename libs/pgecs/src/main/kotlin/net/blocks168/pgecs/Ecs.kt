@@ -1,5 +1,6 @@
 package net.blocks168.pgecs
 
+import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import net.blocks168.pgecs.db.Database
 import net.blocks168.pgecs.db.TxScope
@@ -15,6 +16,9 @@ import net.blocks168.pgecs.query.exec.ResultSizeException
 import net.blocks168.pgecs.query.sql.Mode
 import net.blocks168.pgecs.schema.Freeze
 import net.blocks168.pgecs.schema.FreezeReport
+import net.blocks168.pgecs.system.SchedulerConfig
+import net.blocks168.pgecs.system.SystemComponent
+import net.blocks168.pgecs.system.Systems
 
 /**
  * The pgecs entry point: one Postgres database as the ECS (docs/pgecs.md, *Kotlin API sketch*).
@@ -33,9 +37,15 @@ class Ecs internal constructor(
     val database: Database,
     val engine: QueryEngine,
     private val ownsDatabase: Boolean,
+    /** This process: the owner of the leases it takes. Random unless configured. */
+    val processId: UUID,
+    schedulerConfig: SchedulerConfig,
 ) : Queryable, AutoCloseable {
     /** The registered types; add more before [freeze]. */
     val registry = Registry()
+
+    /** Scheduled systems and observers; register them after [freeze], then [Systems.start]. */
+    val systems: Systems = Systems(this, schedulerConfig)
 
     @Volatile
     var freezeReport: FreezeReport? = null
@@ -158,6 +168,7 @@ class Ecs internal constructor(
     }
 
     override fun close() {
+        systems.close()
         engine.close()
         if (ownsDatabase) database.close()
     }
@@ -171,6 +182,11 @@ object Pgecs {
     class Options {
         /** The query engine's settings. */
         var engine: QueryEngineConfig = QueryEngineConfig()
+
+        /** The process id ([Ecs.processId]); stable ids from config make leases survive restarts. */
+        var processId: UUID = UUID.randomUUID()
+
+        var scheduler: SchedulerConfig = SchedulerConfig()
 
         /** Whether to register every [PgecsModule] found by [java.util.ServiceLoader]. */
         var loadModules: Boolean = true
@@ -196,8 +212,8 @@ object Pgecs {
 
     private fun create(database: Database, ownsDatabase: Boolean, configure: Options.() -> Unit): Ecs {
         val options = Options().apply(configure)
-        val ecs = Ecs(database, QueryEngine(options.engine), ownsDatabase)
-        ecs.registry.register(ChildOf)
+        val ecs = Ecs(database, QueryEngine(options.engine), ownsDatabase, options.processId, options.scheduler)
+        ecs.registry.register(ChildOf, SystemComponent)
         if (options.loadModules) ecs.registry.registerModules()
         ecs.registry.register(options.types)
         return ecs

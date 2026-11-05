@@ -565,15 +565,11 @@ Expiry always deletes the entity that expires. Anything that should expire on it
 - A temporary ban is not a tag on the account. It is a `b8:mod:ban:v1` entity with an expiry component and `(pgecs:child-of, <account>)`. Whether an account is banned is a query (`has a ban child`), and the ban entity can carry its reason, issuer and dates.
 
 ```kotlin
-ecs.system("b8:util:expire-slow") {
-    every(5.minutes)
-    query {
-        val e by entity
-        e has ExpiresSlowComponent.where { it < now() }
-        orderBy { e[ExpiresSlowComponent] }
-    }
-    batch(500) { rows -> rows.forEach { delete(it[e]) } }
-}
+ecs.systems.system("b8:util:expire-slow", Duration.ofMinutes(5), batchSize = 500, {
+    val e by entity
+    e has ExpiresSlowComponent.where { it < now() }
+    select { e }
+}) { rows -> rows.forEach { delete(it) } }
 ```
 
 `now()` is a parameter bound at each execution, never a constant baked into a cached plan. Deleting runs the normal cleanup policies, so the entity's children go too.
@@ -599,16 +595,23 @@ The change trigger records every delete, including rows removed by cascades, so 
 3. **React.** pgecs groups the changes per entity and transaction and hands the observer a `Removed` view of the entity as it was. The observer runs in its own `SERIALIZABLE` tx. It may only write to the database, typically outbox entries, and it advances its cursor in that same tx. Database effects therefore happen exactly once, and external effects at least once through the outbox.
 
 ```kotlin
-ecs.observer("b8:mod:notify-ban-ended") {
-    onRemove(BanComponent)
-    batch(100) { removed ->
-        removed.forEach { ban ->
-            val account = ban.old[ChildOf] ?: return@forEach
-            outbox(Message.toAccount(account, "Your ban has ended"))
-        }
+ecs.systems.observer("b8:mod:notify-ban-ended", Observe.removed(BanComponent), batchSize = 100) { removed ->
+    removed.forEach { ban ->
+        val account = ban.old[ChildOf] ?: return@forEach
+        outbox(Message.toAccount(account, "Your ban has ended"))
     }
 }
 ```
+
+### Implementation (systems)
+
+`net.blocks168.pgecs.system.Systems`, reached as `ecs.systems` (register after `freeze()`, then `start()`; tests drive one step with `runOnce(name)`):
+
+- **Rows.** Each system is the entity UUIDv5(`pgecs:system:<name>`) with `pgecs:system:v1 = {name, kind, nextRun, leaseOwner, leaseUntil, cursorXid, cursorEntity}`, created with `on conflict do nothing` so a second process never resets it. Times are the database clock (epoch millis); the lease owner is `Ecs.processId`. Base schema V2 keeps `pgecs:system:v1` out of `ecs_change`, like the outbox.
+- **Periodic** (`system(name, every, batchSize, query, action)`, or `task(name, every, action)` without a query): one `update ... returning` claims the lease when the run is due and the lease is free. The leader runs batches, renewing the lease after half of it, and sets `nextRun` and clears the lease at the end. A process that finds the lease held by another joins as a helper. A batch is the query with `limit n` and `for update of <its first component match> skip locked`, in one transaction with the action. A run stops after `maxBatchesPerRun` batches, in case an action leaves its rows matching.
+- **Observers** (`observer(name, Observe.removed(C), ..., action)`): one leased process per observer. A batch transaction checks the lease and reads up to `batchSize` groups `(xid, entity)` after the cursor with `xid < pg_snapshot_xmin(pg_current_snapshot())`. It hands them to the action as `EntityChange`s (`added`, `removed`, `updated`, `old[Component]`, `old[ExclusiveRelation]`, `old.targets`, `old.had(tag)`) and advances the cursor in the same transaction. A new observer starts at the current `xmin`, not at the start of the log. An idle observer moves its cursor up to `xmin` once a minute, so retention is not held back.
+- **Retention.** `start()` installs `pgecs:change-retention` (hourly). It deletes change rows older than `changeRetention` (7 days) whose xid is below every observer's cursor.
+- **Expiry** is `libs/b8-util` (`Expiry.install(ecs)`, `ExpiresSlowComponent`, `ExpiresFastComponent`, `notExpired(e)`), with an index on exactly the SQL the compiler renders for `it < now()`.
 
 ## Kotlin API sketch
 

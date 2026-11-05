@@ -9,6 +9,7 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import net.blocks168.pgecs.db.Database
+import net.blocks168.pgecs.toSpec
 import java.security.MessageDigest
 import java.sql.Connection
 import java.sql.SQLException
@@ -23,7 +24,10 @@ object CoreComponents {
         traits = Traits(exclusive = true, acyclic = true, onDeleteTarget = Cleanup.DELETE),
     )
 
-    val ALL: List<ComponentSpec> = listOf(CHILD_OF)
+    /** Leases, schedules and observer cursors of systems (net.blocks168.pgecs.system). */
+    val SYSTEM: ComponentSpec by lazy { net.blocks168.pgecs.system.SystemComponent.toSpec() }
+
+    val ALL: List<ComponentSpec> by lazy { listOf(CHILD_OF, SYSTEM) }
 }
 
 /** Freeze stopped; [problems] says why, one line each. Nothing that was applied is unsafe to keep. */
