@@ -330,11 +330,11 @@ The Kotlin DSL reads like the flecs term list. Its infix functions and operators
 | `A \|\| B` | `acc has (A or B)` | infix `or` on components |
 | value predicate | `mail has EmailComponent.where { it.address == addr }` | decompiled; `addr` becomes a bind parameter |
 
-Variables are declared with `val acc by entity`, so the name shows up in plans and errors. A variable is a typed `Var<EntityId>`. Projection is a decompiled lambda whose return type types the query: `select { acc }` gives `Query<EntityId>`, and `select { acc to mail[EmailComponent].address }` gives `Query<Pair<EntityId, String>>`. Inside it, `mail[EmailComponent]` is a marker that the compiler turns into a JSON path; it never executes. In system batches, rows are read by variable: `it[e]`.
+Variables are declared with `val acc by entity`, so the name shows up in plans and errors. A variable is an `EntityId` placeholder (`QueryVariable`), so it can stand wherever an id can, and a real `EntityId` can stand where a variable can (a fixed subject or target, bound as a parameter). Projection is a decompiled lambda whose return type types the query: `select { acc }` gives `Query<EntityId>`, and `select { acc to mail[EmailComponent].address }` gives `Query<Pair<EntityId, String>>`. Inside it, `mail[EmailComponent]` is a marker that the compiler turns into a JSON path; it never executes. In system batches, rows are read by variable: `it[e]`.
 
 Predicates mean exactly what they say. `it.address == addr` is an exact match. A case-insensitive lookup is written as one, `it.address.lowercase() == addr.lowercase()`, and only then does the compiler use the matching `lower(value->>'address')` index.
 
-The Java DSL is the same builder without Kotlin-only features (reified generics, extension functions, operator overloads). It passes component handles explicitly and takes the same `Serializable` functional interfaces.
+The Java DSL is the same builder without Kotlin-only features (reified generics, extension functions, operator overloads). It passes component handles explicitly and takes the same `Serializable` functional interfaces. Its body is a `QueryBody<R>` returning the `Selection` from `select`; `QueryBody` is deliberately not a Kotlin `fun interface`, so a Kotlin lambda always resolves to the `QueryScope` overload. Supported inside lambdas: component getters (by `@SerialName`), comparisons, `&&`/`||`/`!`, null checks, `?:`, `if`/`else`, string templates of non-null strings, arithmetic, `String` `lowercase`/`uppercase`/`trim`/`length`/`isEmpty`/`startsWith`/`endsWith`/`contains` (case-sensitive), `Instant` comparisons and `plus`/`minus`, `now()`, `entity.id`, `entity[Component]`, and in `select` also `to`, `Pair`/`Triple` and constructors.
 
 ```kotlin
 val q = ecs.query {
@@ -380,15 +380,15 @@ fun accountByEmail(addr: String): EntityId? = ecs.read {
 `pgecs-ksp` generates, per Gradle module:
 
 - The module registry and its `META-INF/services` entry (see Registry and freeze).
-- **Infix relation functions:** for every `object X : Relation(...)`, a top-level extension `infix fun QueryScope.Var<EntityId>.x(target: Var<EntityId>)`, first letter lower-cased (`ChildOf` becomes `childOf`). KSP cannot add members to a class, so these are top-level extensions. They are harmless outside queries because `QueryScope.Var` only exists inside `query { }`.
+- **Infix relation functions:** for every `object X : Relation(...)`, a top-level extension `infix fun EntityId.x(target: EntityId)`, first letter lower-cased (`ChildOf` becomes `childOf`). KSP cannot add members to a class, so these are top-level extensions. They find their query through the variable on either side (or the `query { }` running on the thread) and throw outside one.
 - **Write accessors** for `create { }` and `update(e) { }`:
 
 | Declared | Generated | Usage |
 | --- | --- | --- |
 | `object EmailComponent : Component<Email>` | set-only property `email` | `email = Email("aea")`, `email = null` removes it |
-| `object Account : Tag` | `unaryPlus` / `unaryMinus` | `+Account`, `-Account` |
-| Exclusive `object ChildOf : Relation` | set-only property `childOf` | `childOf = acc` replaces the old parent |
-| non-exclusive `Relation` | `unaryPlus` / `unaryMinus` on the pair | `+OwnedBy(acc)`, `-OwnedBy(acc)` |
+| `object Account : Tag` | nothing: `unaryPlus` / `unaryMinus` are members of `EntityWriter` | `+Account`, `-Account` |
+| `object ChildOf : ExclusiveRelation` | set-only property `childOf` | `childOf = acc` replaces the old parent |
+| non-exclusive `Relation` | nothing: `invoke` and `unaryPlus` / `unaryMinus` on the pair are `EntityWriter` members | `+OwnedBy(acc)`, `-OwnedBy(acc)` |
 
 Value component objects end in `Component`, and the generated name drops that suffix (`EmailComponent` becomes `email`). `@PgecsName("...")` overrides it, and two generated names colliding in one package is a build error. The properties are set-only: their getter is marked `@Deprecated(level = ERROR)`, so reading one is a compile error. Reads are explicit and can suspend: `get(EmailComponent)` returns `Email?`. Without the processor, `this[EmailComponent] = Email("aea")`, `add(Account)` and `get(...)` always work, and the Java DSL uses `set`, `add`, `remove` and `get`.
 
