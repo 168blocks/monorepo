@@ -108,6 +108,29 @@ jobs:
       - name: Network tests
         run: tools/network.sh test
 
+      # tests that need a service the network lacks are skipped, not failed: show the counts
+      - name: Test summary
+        if: always()
+        run: |
+          {
+            echo '| Test class | Tests | Skipped | Failures | Errors |'
+            echo '| --- | --- | --- | --- | --- |'
+            for f in e2e/build/test-results/test/TEST-*.xml; do
+              [ -f "$f" ] || continue
+              sed -n 's/.*<testsuite name="\([^"]*\)" tests="\([0-9]*\)" skipped="\([0-9]*\)" failures="\([0-9]*\)" errors="\([0-9]*\)".*/| \1 | \2 | \3 | \4 | \5 |/p' "$f"
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: E2E test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results
+          path: |
+            e2e/build/reports/
+            e2e/build/test-results/
+          if-no-files-found: ignore
+
       - name: Container logs
         if: failure()
         run: |
@@ -115,15 +138,12 @@ jobs:
           ./dev podman ps -a > network-logs/ps.txt 2>&1 || true
           tools/network.sh logs > network-logs/compose.log 2>&1 || true
 
-      - name: Upload test reports and container logs
+      - name: Upload container logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: network-reports
-          path: |
-            network-logs/
-            e2e/build/reports/
-            e2e/build/test-results/
+          name: network-logs
+          path: network-logs/
           if-no-files-found: ignore
 
       - name: Network down
