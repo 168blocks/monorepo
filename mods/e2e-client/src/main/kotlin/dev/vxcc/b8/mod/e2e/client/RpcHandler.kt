@@ -46,11 +46,12 @@ import java.util.concurrent.TimeUnit
  *
  * | op | parameters | result |
  * | --- | --- | --- |
- * | `status` | | screen, dimension, player, window size, fps, joins (worlds entered so far) |
+ * | `status` | | screen, dimension, player, window size, fps, frames, joins (worlds entered so far), render (section and chunk statistics) |
  * | `awaitReady` | timeoutMs | the game finished loading and shows the title screen |
  * | `connect` | host, port | starts joining the server (title screen → connect screen) |
  * | `disconnect` | | back to the title screen |
- * | `awaitWorld` | dimension?, afterJoins? (0), rendered? (true), timeoutMs | in a world (entered more than `afterJoins` times, e.g. after a server switch) with a player, all visible sections built |
+ * | `awaitWorld` | dimension?, afterJoins? (0), rendered? (true), timeoutMs | in a world (entered more than `afterJoins` times, e.g. after a server switch) with a player and, with `rendered`, the view rendered as `awaitRendered` checks it |
+ * | `awaitRendered` | radius?, minSections? (1), frames? (5), timeoutMs | the world around the player is on screen: see [RenderWait]; its statistics |
  * | `awaitEntity` | name, timeoutMs | another entity with that name is in the client's world: its position |
  * | `awaitChat` | contains, since? (0), timeoutMs | the first matching chat line at or after `since` |
  * | `chatLog` | since? (0) | lines since `since`, `next` index |
@@ -126,6 +127,7 @@ object RpcHandler {
             val dimension = req.str("dimension")
             val rendered = req.bool("rendered") ?: true
             val afterJoins = req.int("afterJoins") ?: 0
+            val wait = RenderWait(req)
             await(req) { mc ->
                 if (E2eClient.joins.get() <= afterJoins) return@await null
                 val level = mc.level ?: return@await null
@@ -133,9 +135,13 @@ object RpcHandler {
                 if (mc.gui.screen() != null) return@await null // loading / receiving level screens
                 if (dimension != null && level.dimension().identifier().toString() != dimension) return@await null
                 if (!level.hasChunkAt(player.blockPosition())) return@await null
-                if (rendered && !mc.levelRenderer.hasRenderedAllSections()) return@await null
+                if (rendered && wait.poll(mc) == null) return@await null
                 status(mc)
             }
+        }
+        "awaitRendered" -> {
+            val wait = RenderWait(req)
+            await(req) { mc -> wait.poll(mc) }
         }
         "awaitEntity" -> {
             val name = req.str("name") ?: throw IllegalArgumentException("missing name")
@@ -225,7 +231,9 @@ object RpcHandler {
         put("width", mc.window.width)
         put("height", mc.window.height)
         put("fps", mc.fps)
+        put("frames", E2eClient.frames.get())
         put("joins", E2eClient.joins.get())
+        put("render", RenderWait.stats(mc, RenderWait.defaultRadius(mc)).json())
     }
 
     private fun entity(e: Entity): JsonObject = buildJsonObject {

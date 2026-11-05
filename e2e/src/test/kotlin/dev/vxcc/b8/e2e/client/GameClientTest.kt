@@ -26,17 +26,17 @@ class GameClientTest {
             // turns the client away)
             val lobby = client.join(network.edge(1), "minecraft:overworld")
             assertEquals(name, lobby["player"]!!.jsonObject["name"]!!.jsonPrimitive.content)
-            Thread.sleep(1000)
-            client.screenshot("lobby").assertNotBlank()
+            client.renderedScreenshot("lobby")
 
-            // the survival world, without the HUD, looking slightly up: horizon and sky
+            // the survival world, without the HUD, looking slightly up: horizon and sky. Wait for the
+            // terrain in view to be rendered, not for a fixed time (#89: on a fresh world the chunks
+            // around spawn can take longer than that to arrive and compile).
             client.switchServer("survival", "minecraft:overworld")
             client.hud(visible = false).look(yaw = 0.0, pitch = -15.0)
-            Thread.sleep(2000)
-            val first = client.screenshot("survival").assertNotBlank()
+            val first = client.renderedScreenshot("survival", minSections = 10)
             assertEquals(854 to 480, first.width to first.height)
             // a still view renders (nearly) the same frame again
-            Thread.sleep(500)
+            client.awaitRendered(minSections = 10)
             val second = client.screenshot("survival-again").assertNotBlank()
             val diff = first.difference(second)
             assertTrue(diff < 0.05, "consecutive frames differ by $diff")

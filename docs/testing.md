@@ -138,8 +138,15 @@ scenario("second player sees the first in the lobby") {
 
 * `mods/e2e-client`: dev-only, client-only Fabric mod, never deployed. A JSON-lines RPC on a free
   localhost port (written to `e2e-rpc.port` in the run directory): `connect`, `awaitReady`,
-  `awaitWorld`, `awaitEntity`, `awaitChat`, `chat`, `command`, `look`, `input` (hold keys), `hud`,
-  `screenshot`, `quit` (`RpcHandler`). A mixin makes the window always count as focused.
+  `awaitWorld`, `awaitRendered`, `awaitEntity`, `awaitChat`, `chat`, `command`, `look`, `input` (hold
+  keys), `hud`, `screenshot`, `quit` (`RpcHandler`). A mixin makes the window always count as focused,
+  another counts rendered frames.
+* Screenshots wait for the rendered world, never for a fixed time (#89): `awaitRendered` (`RenderWait`)
+  waits until the chunks around the player are loaded, their visible sections compiled, and that has
+  stayed unchanged for a few frames; `awaitWorld` and `ScenarioClient.screenshot` include it, and
+  `GameClient.renderedScreenshot` also retries a blank frame, failing with the render statistics of
+  every attempt. Vanilla's `hasRenderedAllSections` alone is not enough: it is true before the first
+  chunk arrives. The clients run without chunk fade-in.
 * `:mods:e2e-client:clientLaunch` writes how Loom's `runClient` would start the game to
   `build/e2e-client/launch.json`; `GameClients` (in `e2e/`) starts clients from it, each with its own
   run directory (`e2e/build/e2e-clients/<name>`: `client.log`, `screenshots/`), offline-mode username
