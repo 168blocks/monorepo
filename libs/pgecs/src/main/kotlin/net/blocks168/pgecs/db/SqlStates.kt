@@ -33,6 +33,8 @@ object SqlStates {
     const val CATALOG_WRITE = "EC009"
     /** A misrouted or malformed outbox entry: unknown capability, or a target endpoint without it. */
     const val OUTBOX_ROUTING = "EC010"
+    /** A value that breaks one of its component's `validate { }` rules. */
+    const val RULE_VIOLATION = "EC011"
 
     private val RETRYABLE = setOf(SERIALIZATION_FAILURE, DEADLOCK_DETECTED)
 

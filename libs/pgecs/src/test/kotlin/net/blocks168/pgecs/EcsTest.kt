@@ -193,6 +193,32 @@ class EcsTest {
         val bad = assertFailsWith<SQLException> { ecs.tx { create { this[MailComponent] = Mail("not-an-address") } } }
         assertEquals("EC005", bad.sqlState)
         assertFailsWith<ComponentValidationException> { ecs.tx { create { this[MailComponent] = Mail("a b@c") } } }
+        // the same rule holds in Postgres for writes that do not go through Kotlin
+        val e = ecs.tx { create { } }
+        val raw = assertFailsWith<SQLException> {
+            ecs.database.tx {
+                connection.prepareStatement("insert into ecs_component (entity, rel, value) values (?, ?, ?::jsonb)").use {
+                    it.setObject(1, e.id); it.setString(2, MailComponent.name); it.setString(3, """{"address":"x y@z"}""")
+                    it.executeUpdate()
+                }
+            }
+        }
+        assertEquals("EC011", raw.sqlState)
+    }
+
+    @Test
+    fun `rules render to SQL unless they are Kotlin-only, and untranslatable ones are refused`() {
+        assertEquals(listOf("no spaces"), MailComponent.toSpec().rules.map { it.description })
+        val kotlinOnly = object : Component<Score>("test:ecs:kotlin-only:v1") {
+            init { validate("odd", kotlinOnly = true) { it.points.hashCode() % 2 == 1 } }
+        }
+        assertEquals(emptyList(), kotlinOnly.toSpec().rules)
+        assertFailsWith<ComponentValidationException> { kotlinOnly.check(Score(2)) }
+        val untranslatable = object : Component<Score>("test:ecs:untranslatable:v1") {
+            init { validate("odd") { it.points.hashCode() % 2 == 1 } }
+        }
+        val e = assertFailsWith<net.blocks168.pgecs.dsl.QueryBuildException> { untranslatable.toSpec() }
+        assertTrue("kotlinOnly" in e.message!!, e.message)
     }
 
     @Test

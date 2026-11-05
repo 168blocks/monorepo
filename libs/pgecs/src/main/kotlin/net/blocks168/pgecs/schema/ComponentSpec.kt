@@ -29,6 +29,8 @@ data class ComponentSpec(
     val jsonSchema: String? = null,
     /** Per-component indexes. [Traits.exclusive] adds its own unique index. */
     val indexes: List<IndexSpec> = emptyList(),
+    /** Validation rules Postgres checks on every write, next to the JSON Schema; only for values. */
+    val rules: List<RuleSpec> = emptyList(),
 ) {
     /** UUIDv5 of [name]: the component's entity id, the same in every process. */
     val entity: UUID get() = ComponentIds.of(name)
@@ -47,6 +49,8 @@ data class ComponentSpec(
             runCatching { Json.parseToJsonElement(jsonSchema) }.onFailure { add("$name: JSON Schema is not valid JSON: ${it.message}") }
         }
         if (kind == ComponentKind.CAPABILITY && indexes.isNotEmpty()) add("$name: capabilities have no indexes")
+        if (kind != ComponentKind.VALUE && rules.isNotEmpty()) add("$name: only value components have validation rules")
+        rules.groupBy { it.description }.filter { it.value.size > 1 }.keys.forEach { add("$name: rule '$it' is declared twice") }
         val keys = allIndexes().map { it.key }
         keys.groupBy { it }.filter { it.value.size > 1 }.keys.forEach { add("$name: index key '$it' is declared twice") }
         indexes.forEach { idx -> idx.problems().forEach { add("$name: index ${idx.key}: $it") } }
@@ -66,6 +70,8 @@ data class ComponentSpec(
             put("traits", traits.toJson())
             put("schema", canonicalSchema() ?: kotlinx.serialization.json.JsonNull)
             put("indexes", JsonObject(allIndexes().sortedBy { it.key }.associate { it.key to it.toJson() }))
+            // only when present, so components without rules keep the fingerprints they had before rules existed
+            if (rules.isNotEmpty()) put("rules", RuleSpec.toJson(rules))
         }
         val bytes = MessageDigest.getInstance("SHA-256").digest(canonical(doc).toString().toByteArray())
         return bytes.joinToString("") { "%02x".format(it) }
@@ -214,5 +220,26 @@ object ComponentIds {
         h[8] = ((h[8].toInt() and 0x3f) or 0x80).toByte()
         val bb = java.nio.ByteBuffer.wrap(h, 0, 16)
         return UUID(bb.long, bb.long)
+    }
+}
+
+/**
+ * A validation rule as Postgres checks it: [sql] is a boolean expression over the column `value`
+ * (`ecs_component.value`). A value is rejected when it is `false`. Rules from `validate { }` are rendered
+ * like a `where { }` predicate, two-valued, so a value passes exactly when `where { rule }` would match it.
+ */
+data class RuleSpec(val description: String, val sql: String) {
+    companion object {
+        /** The catalog form, `[{"description": ..., "sql": ...}]`, sorted by description. */
+        fun toJson(rules: List<RuleSpec>): JsonArray = JsonArray(
+            rules.sortedBy { it.description }.map {
+                buildJsonObject { put("description", it.description); put("sql", it.sql) }
+            },
+        )
+
+        fun fromJson(e: JsonElement): List<RuleSpec> = (e as JsonArray).map {
+            val o = it as JsonObject
+            RuleSpec((o["description"] as JsonPrimitive).content, (o["sql"] as JsonPrimitive).content)
+        }
     }
 }

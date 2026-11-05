@@ -138,6 +138,7 @@ class Freeze(private val db: Database) {
         val schema: String?,
         val fingerprint: String,
         val indexes: Map<String, DbIndex>,
+        val rules: List<RuleSpec>,
     ) {
         /** The catalog row as a spec, for comparing with the registry. */
         fun asSpec() = ComponentSpec(
@@ -146,6 +147,7 @@ class Freeze(private val db: Database) {
             traits = traits,
             jsonSchema = schema,
             indexes = indexes.values.map { it.spec }.filter { it.key != IndexSpec.EXCLUSIVE_KEY },
+            rules = rules,
         )
     }
 
@@ -170,7 +172,7 @@ class Freeze(private val db: Database) {
                 }
             }
             return st.executeQuery(
-                "select name, entity, kind, state, traits::text, json_schema::text, fingerprint from ecs_component_type",
+                "select name, entity, kind, state, traits::text, json_schema::text, fingerprint, rules::text from ecs_component_type",
             ).use { rs ->
                 buildMap {
                     while (rs.next()) {
@@ -186,6 +188,7 @@ class Freeze(private val db: Database) {
                                 schema = rs.getString(6),
                                 fingerprint = rs.getString(7),
                                 indexes = indexes[name].orEmpty(),
+                                rules = RuleSpec.fromJson(Json.parseToJsonElement(rs.getString(8))),
                             ),
                         )
                     }
@@ -207,6 +210,8 @@ class Freeze(private val db: Database) {
         val upgrade: List<ComponentSpec>,
         /** Upgrades whose JSON Schema changed. */
         val schemaChanged: Set<String>,
+        /** Per upgraded component, the validation rules it gains (checked against data in transaction A). */
+        val addedRules: Map<String, List<RuleSpec>>,
         /** Per upgraded component, the traits it gains (checked against data in transaction B). */
         val addedTraits: Map<String, Traits>,
         val indexes: List<IndexWork>,
@@ -236,6 +241,7 @@ class Freeze(private val db: Database) {
         val upgrade = mutableListOf<ComponentSpec>()
         val schemaChanged = mutableSetOf<String>()
         val addedTraits = mutableMapOf<String, Traits>()
+        val addedRules = mutableMapOf<String, List<RuleSpec>>()
         val indexWork = mutableListOf<IndexWork>()
         val unchanged = mutableListOf<String>()
         val newer = mutableListOf<String>()
@@ -285,6 +291,7 @@ class Freeze(private val db: Database) {
                     upgrade += spec
                     indexWork += toBuild
                     if (spec.canonicalSchema() != current.canonicalSchema()) schemaChanged += spec.name
+                    spec.rules.filter { it !in current.rules }.takeIf { it.isNotEmpty() }?.let { addedRules[spec.name] = it }
                     addedTraits[spec.name] = Traits(
                         acyclic = spec.traits.acyclic && !d.traits.acyclic,
                         symmetric = spec.traits.symmetric && !d.traits.symmetric,
@@ -300,6 +307,7 @@ class Freeze(private val db: Database) {
             create = create,
             upgrade = upgrade,
             schemaChanged = schemaChanged,
+            addedRules = addedRules,
             addedTraits = addedTraits,
             indexes = indexWork,
             retire = retire.filter { dbState[it] != null && dbState[it]!!.state != "retired" }.sorted(),
@@ -328,11 +336,11 @@ class Freeze(private val db: Database) {
                     it.setObject(1, spec.entity); it.executeUpdate()
                 }
                 c.prepareStatement(
-                    "insert into ecs_component_type (name, entity, kind, state, traits, json_schema, fingerprint) " +
-                        "values (?, ?, ?, 'pending', '{}', ?::jsonb, '')",
+                    "insert into ecs_component_type (name, entity, kind, state, traits, json_schema, fingerprint, rules) " +
+                        "values (?, ?, ?, 'pending', '{}', ?::jsonb, '', ?::jsonb)",
                 ).use {
                     it.setString(1, spec.name); it.setObject(2, spec.entity); it.setString(3, spec.kind.sql)
-                    it.setString(4, spec.jsonSchema); it.executeUpdate()
+                    it.setString(4, spec.jsonSchema); it.setString(5, RuleSpec.toJson(spec.rules).toString()); it.executeUpdate()
                 }
             }
             for (spec in plan.upgrade.filter { it.name in plan.schemaChanged }) {
@@ -346,6 +354,25 @@ class Freeze(private val db: Database) {
                 if (bad.isNotEmpty()) problems += "${spec.name}: stored values do not match the new JSON Schema (entities ${bad.joinToString()})"
                 c.prepareStatement("update ecs_component_type set json_schema = ?::jsonb where name = ?").use {
                     it.setString(1, spec.jsonSchema); it.setString(2, spec.name); it.executeUpdate()
+                }
+            }
+            for ((name, added) in plan.addedRules) {
+                for (rule in added) {
+                    val bad = try {
+                        c.prepareStatement(
+                            "select entity from ecs_component where rel = ? and value is not null and (${rule.sql}) is false limit 5",
+                        ).use {
+                            it.setString(1, name)
+                            it.executeQuery().use { rs -> buildList<String> { while (rs.next()) add(rs.getString(1)) } }
+                        }
+                    } catch (e: SQLException) {
+                        throw FreezeException(listOf("$name: rule '${rule.description}' is not valid SQL: ${e.message}"))
+                    }
+                    if (bad.isNotEmpty()) problems += "$name: stored values break the new rule '${rule.description}' (entities ${bad.joinToString()})"
+                }
+                val spec = plan.upgrade.first { it.name == name }
+                c.prepareStatement("update ecs_component_type set rules = ?::jsonb where name = ?").use {
+                    it.setString(1, RuleSpec.toJson(spec.rules).toString()); it.setString(2, name); it.executeUpdate()
                 }
             }
             if (problems.isNotEmpty()) throw FreezeException(problems)
@@ -576,6 +603,11 @@ class Freeze(private val db: Database) {
             for (idx in old.indexes) {
                 val ni = newIndexes[idx.key]
                 if (ni == null) add("drops index ${idx.key}") else if (ni != idx) add("changes index ${idx.key}")
+            }
+            val newRules = new.rules.associateBy { it.description }
+            for (r in old.rules) {
+                val nr = newRules[r.description]
+                if (nr == null) add("drops rule '${r.description}'") else if (nr != r) add("changes rule '${r.description}'")
             }
         }
     }

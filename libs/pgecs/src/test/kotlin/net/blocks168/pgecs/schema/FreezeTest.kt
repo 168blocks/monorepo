@@ -125,6 +125,32 @@ class FreezeTest {
     }
 
     @Test
+    fun `validation rules are checked by Postgres, added ones against stored data, and are additive`() {
+        val name = TestDb.unique("ruled")
+        val noSpaces = RuleSpec("no spaces", "(strpos(value->>'address', ' ') = 0)")
+        val short = RuleSpec("short", "(length(value->>'address') < 10)")
+        freeze.run(listOf(email(name, unique = false).copy(rules = listOf(noSpaces))))
+        db.tx { put(newEntity(), name, value = """{"address":"ok@x"}""") }
+        assertSqlState(SqlStates.RULE_VIOLATION) { db.tx { put(newEntity(), name, value = """{"address":"a b@x"}""") } }
+
+        // a new rule that stored data breaks stops freeze and names the entity
+        val long = db.tx { newEntity().also { put(it, name, value = """{"address":"long-address@x"}""") } }
+        val e = assertFailsWith<FreezeException> { freeze.run(listOf(email(name, unique = false).copy(rules = listOf(noSpaces, short)))) }
+        assertTrue(long.toString() in e.message!! && "short" in e.message!!, e.message)
+        db.tx { put(newEntity(), name, value = """{"address":"long-address-2@x"}""") } // the old rules still apply
+        db.tx { connection.exec("delete from ecs_component where rel = ? and length(value->>'address') >= 10", name) }
+        assertEquals(listOf(name), freeze.run(listOf(email(name, unique = false).copy(rules = listOf(noSpaces, short)))).upgraded)
+        assertSqlState(SqlStates.RULE_VIOLATION) { db.tx { put(newEntity(), name, value = """{"address":"long-address@x"}""") } }
+
+        // an older process (one rule) leaves both in place; changing a rule needs a new version
+        assertEquals(listOf(name), freeze.run(listOf(email(name, unique = false).copy(rules = listOf(noSpaces)))).newerInDatabase)
+        val changed = assertFailsWith<FreezeException> {
+            freeze.run(listOf(email(name, unique = false).copy(rules = listOf(noSpaces, short.copy(sql = "(length(value->>'address') < 20)")))))
+        }
+        assertTrue("changes rule 'short'" in changed.message!!, changed.message)
+    }
+
+    @Test
     fun `traits added later are checked against data`() {
         val rel = TestDb.unique("later")
         freeze.run(listOf(ComponentSpec(rel, ComponentKind.RELATION)))

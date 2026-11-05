@@ -471,6 +471,15 @@ internal class Lowering(private val q: QueryBuilder) {
         else -> null
     }
 
+    /** A `Char` argument (`contains(' ')`): the compiler passes a constant as an int, a captured one as a Char. */
+    private fun charArg(lv: LV, ctx: Ctx): Expr? = when {
+        lv is LV.E && lv.expr is Expr.Literal && (lv.expr as Expr.Literal).value is Number ->
+            Expr.Literal(((lv.expr as Expr.Literal).value as Number).toInt().toChar().toString(), ValueType.TEXT)
+        lv is LV.Obj && lv.value is Number && !lv.captured -> Expr.Literal((lv.value as Number).toInt().toChar().toString(), ValueType.TEXT)
+        lv is LV.Obj && lv.value is Char -> objExpr(lv, ctx)
+        else -> textArg(lv, ctx)
+    }
+
     private fun isFalse(lv: LV): Boolean =
         lv is LV.E && lv.expr == Expr.Literal(false, ValueType.BOOL)
 
@@ -507,7 +516,8 @@ internal class Lowering(private val q: QueryBuilder) {
             }
             // (s, other, ignoreCase[, mask, marker]): only the case-sensitive form translates
             if (args.size < 3 || !isFalse(args[2])) fail(ctx, "${c.name.removeSuffix("\$default")} with ignoreCase is not translatable")
-            val other = textArg(args[1], ctx) ?: return null
+            val other = (if (c.descriptor.startsWith("(Ljava/lang/CharSequence;C")) charArg(args[1], ctx) else textArg(args[1], ctx))
+                ?: return null
             return LV.E(Functions.call(fn, s, other))
         }
         return null

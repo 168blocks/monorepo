@@ -11,6 +11,7 @@ import net.blocks168.pgecs.lambda.QueryFunction
 import net.blocks168.pgecs.lambda.QueryPredicate
 import net.blocks168.pgecs.schema.Cleanup
 import net.blocks168.pgecs.schema.IndexSpec
+import net.blocks168.pgecs.schema.RuleSpec
 import net.blocks168.pgecs.serial.SerialTypes
 
 /**
@@ -78,7 +79,9 @@ open class Component<T> : ComponentType {
     val valueType: ValueType get() = SerialTypes.valueType(serializer.descriptor).asNonNull()
 
     private val declaredIndexes = mutableListOf<IndexSpec>()
-    private val kotlinChecks = mutableListOf<Pair<String, QueryPredicate<T>>>()
+    private class Rule<T>(val description: String, val kotlinOnly: Boolean, val check: QueryPredicate<T>)
+
+    private val rules = mutableListOf<Rule<T>>()
 
     private val lambdaIndexes = mutableListOf<Triple<String?, Boolean, QueryFunction<T, *>>>()
 
@@ -118,18 +121,41 @@ open class Component<T> : ComponentType {
     }
 
     /**
-     * A rule checked in Kotlin before every write of this component (pgecs design, *Validation rules*):
-     * for checks that cannot run in SQL, such as calling a library. A failing check throws
-     * [ComponentValidationException] and the write is not buffered.
+     * A rule every value must satisfy (pgecs design, *Validation rules*), as in
+     * `validate("no spaces") { !it.address.contains(' ') }`. The rule is decompiled and rendered to SQL
+     * like a query predicate, and Postgres checks it on every write, next to the JSON Schema; freeze
+     * fails if it cannot be rendered. A rule that cannot run in SQL (calling a library) is marked
+     * [kotlinOnly]. Every rule also runs in Kotlin before a write is buffered, so a failing value
+     * throws [ComponentValidationException] at the write itself.
+     *
+     * Rules are additive like the rest of the schema: adding one checks the stored values at freeze,
+     * while changing or dropping one needs a new version of the component.
      */
-    protected fun validate(description: String, check: QueryPredicate<T>) {
-        kotlinChecks += description to check
+    @JvmOverloads
+    protected fun validate(description: String, kotlinOnly: Boolean = false, check: QueryPredicate<T>) {
+        require(rules.none { it.description == description }) { "component $name: rule '$description' is declared twice" }
+        rules += Rule(description, kotlinOnly, check)
     }
 
-    /** Runs the Kotlin-side checks on [value]. */
+    /** Runs the rules on [value] in Kotlin. */
     fun check(value: T) {
-        for ((description, check) in kotlinChecks) {
-            if (!check.test(value)) throw ComponentValidationException("$name: $description does not hold for $value")
+        for (r in rules) {
+            if (!r.check.test(value)) throw ComponentValidationException("$name: ${r.description} does not hold for $value")
+        }
+    }
+
+    /** The rules Postgres checks, rendered to SQL over the `value` column. */
+    val sqlRules: List<RuleSpec> by lazy {
+        rules.filter { !it.kotlinOnly }.map { r ->
+            val sql = try {
+                IndexExpressions.render(this, r.check)
+            } catch (e: net.blocks168.pgecs.dsl.QueryBuildException) {
+                throw net.blocks168.pgecs.dsl.QueryBuildException(
+                    "$name: rule '${r.description}' cannot be checked in SQL (${e.message}); mark it kotlinOnly = true if it must run in Kotlin only",
+                    e,
+                )
+            }
+            RuleSpec(r.description, sql)
         }
     }
 
