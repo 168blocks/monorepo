@@ -79,7 +79,7 @@ dependencies {
 val stageDir = layout.buildDirectory.dir("stage")
 val acceptEula = providers.gradleProperty("acceptMinecraftEula").map { it.toBoolean() }.orElse(false)
 
-// Forwarding secret shared by Velocity and FabricProxy-Lite; generated once per checkout.
+// Forwarding secret shared by the edge Velocity proxies and FabricProxy-Lite; generated once per checkout.
 val forwardingSecret = tasks.register("forwardingSecret") {
     val out = layout.buildDirectory.file("forwarding.secret")
     outputs.file(out)
@@ -90,15 +90,29 @@ val forwardingSecret = tasks.register("forwardingSecret") {
     }
 }
 
-val stageVelocity = tasks.register<Sync>("stageVelocity") {
-    dependsOn(forwardingSecret)
-    into(stageDir.map { it.dir("velocity") })
-    from(velocityProxy) { rename { "velocity.jar" } }
-    from(velocityPlugins) { into("plugins") }
-    from(e2ePlugins) { into("plugins") }
-    from("velocity")
-    from(layout.buildDirectory.file("forwarding.secret"))
-    preserve { include("logs/**", "plugins/*/**") }
+/**
+ * Edge Velocity proxies: each gets its own directory (logs, plugin data) with velocity.toml rendered
+ * from deploy/edge-velocity/velocity.toml. Edge 3 sits behind an L4 filter stand-in (HAProxy, PROXY
+ * protocol v2), the other edges take players directly.
+ */
+val edges = mapOf("edge-1" to false, "edge-2" to false, "edge-3" to true) // name to haproxy-protocol
+
+val stageEdges = edges.map { (edge, haproxy) ->
+    tasks.register<Sync>("stage${edge.split('-').joinToString("") { it.replaceFirstChar(Char::uppercase) }}") {
+        dependsOn(forwardingSecret)
+        inputs.property("haproxy", haproxy)
+        into(stageDir.map { it.dir(edge) })
+        from(velocityProxy) { rename { "velocity.jar" } }
+        from(velocityPlugins) { into("plugins") }
+        from(e2ePlugins) { into("plugins") }
+        from("edge-velocity") {
+            filesMatching("velocity.toml") {
+                filter { line -> line.replace("@EDGE@", edge).replace("@HAPROXY_PROTOCOL@", haproxy.toString()) }
+            }
+        }
+        from(layout.buildDirectory.file("forwarding.secret"))
+        preserve { include("logs/**", "plugins/*/**") }
+    }
 }
 
 fun stageFabricServer(name: String, mods: Configuration) = tasks.register<Sync>("stage${name.replaceFirstChar(Char::uppercase)}") {
@@ -151,5 +165,5 @@ val stageBackend = tasks.register<Sync>("stageBackend") {
 tasks.register("stage") {
     group = "deploy"
     description = "Stages the compose network into deploy/build/stage"
-    dependsOn(stageVelocity, stageLobby, stageSurvival, stageBackend)
+    dependsOn(stageEdges, stageLobby, stageSurvival, stageBackend)
 }

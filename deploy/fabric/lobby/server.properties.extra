@@ -1,3 +1,4 @@
+server-port=25601
 motd=168blocks lobby
 level-name=world
 gamemode=adventure

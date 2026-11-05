@@ -35,7 +35,7 @@ scenario("second player sees the first in the lobby") {
   `BLOCKS_E2E_EDGES` / `BLOCKS_E2E_BACKEND`, so the same tests can run against staging).
 * `StatusPing`: the Minecraft server list ping, written against the real protocol. `NetworkTest` pings
   each of the three edge proxies and checks that the answer comes from Velocity *with the example
-  plugin loaded* (the plugin sets the MOTD). This covers: edge proxy → PROXY protocol v2 → Velocity →
+  plugin loaded* (the plugin sets the MOTD). This covers: edge Velocity (edge 3 through its PROXY protocol v2 filter) →
   plugin.
 * `NetworkTest` also checks the backend through HTTP (health with database, counter persisted in
   PostgreSQL, web frontend served).
