@@ -74,7 +74,7 @@ object CohostTestMod : DedicatedServerModInitializer {
     private fun waitStopped(server: MinecraftServer, seconds: Long): Boolean {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds)
         while (System.nanoTime() < deadline) {
-            if (!server.isRunning && !server.runningThread.isAlive) return true
+            if (!server.runningThread.isAlive) return true // a crashed server never clears its running flag
             Thread.sleep(50)
         }
         return false
