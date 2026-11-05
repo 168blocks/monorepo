@@ -28,6 +28,7 @@ include(":dns") // player DNS: PowerDNS remote backend on the edges in pgecs (do
 
 // Velocity plugins
 include(":velocity:example-plugin") // Velocity plugin
+include(":velocity:network") // every edge: online players, cross-edge actions, drain, maintenance
 include(":velocity:e2e-agent") // dev only: proxy state over HTTP for the e2e tests
 
 // Network

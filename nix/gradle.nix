@@ -20,8 +20,18 @@
   bashInteractive,
   egglogWasm,
   vodozemacWasm,
+  matrix-tuwunel,
+  writeShellScript,
+  cacert,
 }:
 let
+  # The backend's tests start tuwunel (TestHomeserver), which will not start in the Nix sandbox: it
+  # reads /etc/resolv.conf (absent) unless given DNS servers, and wants a CA bundle. Federation is off,
+  # so it never resolves or connects anywhere.
+  testHomeserver = writeShellScript "tuwunel-test" ''
+    export SSL_CERT_FILE=${cacert}/etc/ssl/certs/ca-bundle.crt
+    exec ${matrix-tuwunel}/bin/tuwunel -O 'dns_servers=["127.0.0.1"]' "$@"
+  '';
   gradle = gradle_9.override { java = jdk; };
   root = ./..;
 
@@ -106,6 +116,8 @@ let
         BLOCKS_EGGLOG_WASM = "${egglogWasm}/egglog.wasm";
         # libs/vodozemac-endive compiles vodozemac (nix/vodozemac-wasm.nix) to JVM classes
         BLOCKS_VODOZEMAC_WASM = "${vodozemacWasm}/vodozemac.wasm";
+        # backend's Matrix bot tests: the throwaway homeserver
+        BLOCKS_MATRIX_TEST_HOMESERVER = "${testHomeserver}";
       };
 
       gradleFlags = [

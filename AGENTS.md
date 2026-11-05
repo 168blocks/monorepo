@@ -132,7 +132,7 @@ PaperMC, Fabric meta and Modrinth. Details: issue #8.
 | `dns/` | Player DNS: PowerDNS remote backend (Ktor) answering from the edges in PostgreSQL (`docs/dns.md`) |
 | `frontend/` | Compose Multiplatform frontend: web (Kotlin/Wasm) and desktop |
 | `mods/<name>` | Fabric mods (Minecraft 26.3, Loom without remapping, fabric-language-kotlin). `mods/example-common`: server + client; `mods/e2e-client`: dev-only client RPC for e2e tests |
-| `velocity/<name>` | Velocity plugins (Kotlin, fat jar via `pluginJar`) |
+| `velocity/<name>` | Velocity plugins (Kotlin, fat jar via `pluginJar`); `velocity/network`: every edge (online players, cross-edge actions, drain, maintenance) |
 | `deploy/` | podman compose network (`compose.yaml`, WireGuard peers in `wireguard/peers.toml`) and the Gradle tasks that stage it (`:deploy:stage`, `:deploy:wireguard`) |
 | `e2e/` | End-to-end tests against the running network |
 | `docs/` | `architecture.md`, `testing.md`, `pgecs.md` (pgecs design), `matrix-bot.md` (backend Matrix bot), `dns.md` (player DNS) |
