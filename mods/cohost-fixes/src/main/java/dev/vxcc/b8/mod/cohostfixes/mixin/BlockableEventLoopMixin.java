@@ -34,7 +34,10 @@ abstract class BlockableEventLoopMixin {
 
     @Redirect(method = "throwDelayedException", at = @At(value = "FIELD", target = "Lnet/minecraft/util/thread/BlockableEventLoop;delayedCrash:Ljava/util/function/Supplier;", opcode = Opcodes.GETSTATIC))
     private Supplier<CrashReport> cohost$thisLoopsCrash() {
+        // thrown once: the loop's crash handling (stopServer) polls tasks again, and a crash that is
+        // still set there fails the stop and leaves the server half-stopped
         Supplier<CrashReport> own = cohost$delayedCrash;
+        cohost$delayedCrash = null;
         return own != null ? own : cohost$relayed();
     }
 

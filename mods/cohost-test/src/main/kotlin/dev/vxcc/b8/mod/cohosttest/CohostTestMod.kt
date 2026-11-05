@@ -85,7 +85,7 @@ object CohostTestMod : DedicatedServerModInitializer {
         val base = mapOf(
             "online-mode" to "false", "server-port" to "0", "level-type" to "minecraft:normal",
             "view-distance" to "4", "simulation-distance" to "4", "spawn-protection" to "0",
-            "management-server-enabled" to "false", "enable-query" to "false", "enable-rcon" to "false",
+            "management-server-enabled" to "false", "pause-when-empty-seconds" to "0", "enable-query" to "false", "enable-rcon" to "false",
         )
         try {
             gameplay(main)

@@ -65,29 +65,34 @@ tasks.register("cohostTest") {
     val dir = layout.buildDirectory.dir("cohost-test").map { it.asFile }
     val allow = layout.projectDirectory.file("static-guard-allow.txt").asFile
     val java = javaLauncher.map { it.executablePath.asFile.absolutePath }
-    val launcher = testLauncher
-    val mods = testMods
-    val agent = testAgent
+    // locals only: the configuration cache cannot serialise references to the script or to configurations
+    val launcher: FileCollection = testLauncher
+    val mods: FileCollection = testMods
+    val agent: FileCollection = testAgent
+    val modJarFile = modJar.flatMap { it.archiveFile }
+    val eula = acceptEula
+    val strictMode = strict
+    val port = serverPort
     outputs.upToDateWhen { false }
     doLast {
-        check(acceptEula.get()) {
+        check(eula.get()) {
             "cohostTest starts a Minecraft server: accept the Minecraft EULA (https://aka.ms/MinecraftEULA) with -PacceptMinecraftEula=true"
         }
         val d = dir.get()
         d.deleteRecursively()
         d.resolve("mods").mkdirs()
         launcher.singleFile.copyTo(d.resolve("fabric-server-launch.jar"))
-        (mods.files + modJar.get().archiveFile.get().asFile).forEach { it.copyTo(d.resolve("mods/${it.name}")) }
+        (mods.files + modJarFile.get().asFile).forEach { it.copyTo(d.resolve("mods/${it.name}")) }
         d.resolve("eula.txt").writeText("eula=true\n")
         d.resolve("server.properties").writeText(
             listOf(
-                "online-mode=false", "server-port=${serverPort.get()}", "view-distance=4", "simulation-distance=4",
+                "online-mode=false", "server-port=${port.get()}", "pause-when-empty-seconds=0", "view-distance=4", "simulation-distance=4",
                 "management-server-enabled=false", "enable-query=false", "enable-rcon=false", "spawn-protection=0",
             ).joinToString("\n", postfix = "\n"),
         )
         val agentJar = agent.singleFile.absolutePath
         val options = listOfNotNull(
-            "strict".takeIf { strict.get() }, "gets=none", "allow=${allow.absolutePath}",
+            "strict".takeIf { strictMode.get() }, "gets=none", "allow=${allow.absolutePath}",
             "report=${d.resolve("static-guard-report.txt")}",
         ).joinToString(";")
         val log = d.resolve("server.log")
