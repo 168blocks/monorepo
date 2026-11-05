@@ -1,0 +1,7 @@
+{
+  "required": true,
+  "package": "dev.vxcc.b8.mod.creativehost.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "server": ["ReloadableResourcesMixin"],
+  "injectors": { "defaultRequire": 1 }
+}

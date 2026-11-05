@@ -43,5 +43,6 @@ if (providers.gradleProperty("blocks.minecraft").orNull != "false") {
     include(":mods:e2e-agent") // dev only: server state over HTTP for the e2e tests
     include(":mods:cohost-fixes") // several MinecraftServers in one JVM: no JVM exit, shared executors (#6)
     include(":mods:cohost-test") // dev only: co-hosting test under the static-guard agent (:mods:cohost-test:cohostTest)
+    include(":mods:creative-host") // extra MinecraftServers in a running server's JVM, started fast (#6)
     include(":deploy") // stages the podman compose network (deploy/compose.yaml)
 }
