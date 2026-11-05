@@ -38,12 +38,53 @@
 
       # egglog as wasm32-wasip1 for libs/pgecs-eqsat (Endive compiles it to JVM classes)
       egglogWasmFor = pkgs: (pkgs.extend rust-overlay.overlays.default).callPackage ./nix/egglog-wasm.nix { };
+
+      # Environment for the real game clients of the end-to-end tests (e2e/.../client, docs/testing.md):
+      # `blocks-client-env <command>` runs <command> with the libraries Minecraft's LWJGL/SDL natives
+      # dlopen (glibc builds; a musl host has none of them) and Mesa software rendering (llvmpipe /
+      # lavapipe), so clients need no GPU. Only the client processes get this, never the dev shell.
+      clientEnvFor =
+        pkgs:
+        let
+          libs = with pkgs; [
+            libglvnd
+            mesa
+            vulkan-loader
+            wayland
+            libxkbcommon
+            libdecor
+            libx11
+            libxcursor
+            libxrandr
+            libxi
+            libxext
+            libxcb
+            libpulseaudio
+            alsa-lib
+            openal
+            udev
+            flite
+            stdenv.cc.cc.lib
+          ];
+        in
+        pkgs.writeShellScriptBin "blocks-client-env" ''
+          export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath libs}
+          export LIBGL_DRIVERS_PATH=${pkgs.mesa}/lib/dri
+          export __EGL_VENDOR_LIBRARY_FILENAMES=${pkgs.mesa}/share/glvnd/egl_vendor.d/50_mesa.json
+          export __GLX_VENDOR_LIBRARY_NAME=mesa
+          export GBM_BACKENDS_PATH=${pkgs.mesa}/lib/gbm
+          export VK_ICD_FILENAMES=$(echo ${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.*.json)
+          export LIBGL_ALWAYS_SOFTWARE=1
+          export XKB_CONFIG_ROOT=${pkgs.xkeyboard-config}/share/X11/xkb
+          exec "$@"
+        '';
     in
     {
       devShells = forAllSystems (
         pkgs:
         let
           jdk = jdkFor pkgs;
+          clientEnv = clientEnvFor pkgs;
         in
         {
           default = pkgs.mkShell {
@@ -67,6 +108,8 @@
               git
               gh
               python3
+              # real game clients in the end-to-end tests (BLOCKS_CLIENT_ENV, BLOCKS_SWAY below)
+              clientEnv
             ];
 
             shellHook = ''
@@ -78,6 +121,8 @@
               export BLOCKS_BINARYEN=${pkgs.binaryen}
               export BLOCKS_BASH=${pkgs.bashInteractive}/bin/bash
               export BLOCKS_EGGLOG_WASM=${egglogWasmFor pkgs}/egglog.wasm
+              export BLOCKS_CLIENT_ENV=${clientEnv}/bin/blocks-client-env
+              export BLOCKS_SWAY=${pkgs.sway}/bin/sway
               # per-checkout slot, ports and compose project (several worktrees side by side)
               if root=$(git rev-parse --show-toplevel 2>/dev/null) && [ -f "$root/tools/instance.sh" ]; then
                 BLOCKS_ROOT=$root . "$root/tools/instance.sh"
