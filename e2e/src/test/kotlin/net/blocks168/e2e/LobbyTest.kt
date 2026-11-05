@@ -2,22 +2,67 @@ package net.blocks168.e2e
 
 import kotlinx.coroutines.runBlocking
 import net.blocks168.e2e.agent.ServerAgent
+import net.blocks168.e2e.bot.Bot
+import net.blocks168.e2e.bot.BotException
+import net.blocks168.e2e.bot.Vec3
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Tag
+import java.io.IOException
+import java.util.concurrent.ThreadLocalRandom
 import kotlin.test.Test
 import kotlin.test.assertContains
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * The lobby world (deploy/fabric/lobby): a flat grass layer at y=-64 with the spawn on top of it at
- * 0/-63/0, its chunks kept loaded (#26: players spawned inside the ground otherwise).
+ * 0/-63/0, its chunks kept loaded (#26: players spawned inside the ground otherwise). Needs the
+ * Minecraft servers (BLOCKS_ACCEPT_EULA=true); skipped otherwise.
  */
 @Tag("network")
 class LobbyTest {
+    private val eula get() = System.getenv("BLOCKS_ACCEPT_EULA") == "true"
+
+    @Test
+    fun playersSpawnOnTheFloorAndCanWalk() = runBlocking {
+        assumeTrue(eula, "Minecraft EULA not accepted (BLOCKS_ACCEPT_EULA)")
+        ServerAgent.fromEnv("lobby").use { lobby ->
+            lobby.awaitReady(5.minutes)
+            val name = "spawn_" + Integer.toString(ThreadLocalRandom.current().nextInt(36 * 36 * 36 * 36 * 36), 36)
+            join(Bot(name)).use { bot ->
+                bot.awaitWorld("minecraft:overworld")
+                assertEquals(Vec3(0.5, -63.0, 0.5), bot.position, "spawn position")
+                Thread.sleep(2000) // long enough to take suffocation damage
+                val p = lobby.player(name) ?: error("$name not on the lobby")
+                assertEquals(Triple(0.5, -63.0, 0.5), Triple(p.x, p.y, p.z), "position on the server")
+                assertContains(lobby.command("data get entity $name Health").text, "20.0f")
+                // the walking area: a 20x20 square around the spawn, without position corrections
+                val start = bot.position
+                for ((dx, dz) in listOf(10.0 to 0.0, 10.0 to 10.0, -10.0 to 10.0, -10.0 to -10.0, 0.0 to 0.0)) {
+                    bot.moveTo(start + Vec3(dx, 0.0, dz), step = 0.2)
+                }
+            }
+        }
+    }
+
+    /** Joins through edge 1, retrying while the servers behind Velocity are still starting. */
+    private fun join(bot: Bot): Bot {
+        val end = System.nanoTime() + 180.seconds.inWholeNanoseconds
+        while (true) {
+            try {
+                return bot.connect(Network.fromEnv().edge(1), 60.seconds)
+            } catch (e: Exception) {
+                if ((e !is BotException && e !is IOException) || System.nanoTime() > end) throw e
+                Thread.sleep(3000)
+            }
+        }
+    }
+
     @Test
     fun spawnStandsOnAFreeFlatFloor() = runBlocking {
-        assumeTrue(System.getenv("BLOCKS_ACCEPT_EULA") == "true", "Minecraft EULA not accepted (BLOCKS_ACCEPT_EULA)")
+        assumeTrue(eula, "Minecraft EULA not accepted (BLOCKS_ACCEPT_EULA)")
         ServerAgent.fromEnv("lobby").use { lobby ->
             lobby.awaitReady(5.minutes)
             suspend fun check(command: String) = lobby.command(command).also { assertTrue(it.success, "$command: $it") }

@@ -43,8 +43,9 @@ scenario("second player sees the first in the lobby") {
   `e2e/.../agent/`; `AgentTest` checks that Velocity reports its servers and that both Fabric servers
   report their worlds and run commands (`list`). The Fabric server tests are skipped unless
   `BLOCKS_ACCEPT_EULA=true`.
-* `LobbyTest` checks the lobby world through the agent: grass floor and free space around the spawn,
-  forced spawn chunks, game rules (#26).
+* `LobbyTest`: a bot joins the lobby at 0.5/-63/0.5, stays at full health and walks a 20x20 square;
+  through the agent, the grass floor and free space around the spawn, forced spawn chunks, game
+  rules (#26).
 * `bot.Bot`: the protocol-level bot client (see "Drivers" below), Minecraft 26.3 / protocol 777.
   Offline login through an edge proxy and Velocity (compression, login plugin queries, cookies),
   configuration (known packs, keep-alive, resource packs, code of conduct), play (keep-alive, ping,
