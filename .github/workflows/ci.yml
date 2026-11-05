@@ -102,7 +102,7 @@ jobs:
       - name: Hint on out-of-date dependency lock
         if: failure()
         run: |
-          if grep -E -q "Could not (resolve|GET|HEAD|download)|Received status code 404|hash mismatch in fixed-output derivation|Failed to (download|fetch)" nix-*.log 2>/dev/null; then
+          if grep -E -q "Could not (resolve|find|GET|HEAD|download)|Received status code 404|hash mismatch in fixed-output derivation|Failed to (download|fetch)" nix-*.log 2>/dev/null; then
             echo "::error file=nix/gradle-deps.json::nix/gradle-deps.json looks out of date (a download mitm-cache cannot serve, or a changed hash). Re-record it with \`nix run .#update-gradle-deps\` in the repository root and commit the JSON (AGENTS.md, Hermetic Nix build)."
           else
             echo "::error::The hermetic Nix build failed. If it is a missing dependency, re-record nix/gradle-deps.json with \`nix run .#update-gradle-deps\` (AGENTS.md, Hermetic Nix build)."
