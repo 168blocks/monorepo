@@ -1,11 +1,10 @@
 # Architecture
 
 ```
- players ──► edge proxy 1 ─┐
- players ──► edge proxy 2 ─┼─(PROXY v2)─► Velocity (main) ──► lobby server(s)
- players ──► edge proxy 3 ─┘                  │          ├──► main game server (survival)
-                                               │          └──► creative host (many servers, one JVM)
-                                               ▼
+ players ──► edge Velocity 1 ──┐                     ┌──► lobby server(s)
+ players ──► edge Velocity 2 ──┼─(WireGuard, core)───┼──► main game server (survival)
+ players ─► [L4 filter] ─► 3 ──┘          │          └──► creative host (many servers, one JVM)
+                                          ▼
  browser ──► backend (Ktor, serves frontend) ──► PostgreSQL (pgecs)   S3 store (backups, replays)
 ```
 
@@ -14,15 +13,22 @@ pgecs). Java 25 is the minimum: Minecraft 26.3 and Velocity 4.3 require it.
 
 ## Components
 
-* **Edge proxies** (3, spread across the world): accept players close to them, terminate TLS, and
-  forward to the main Velocity with a PROXY protocol v2 header (Velocity: `haproxy-protocol = true`)
-  so it sees real addresses. Locally they are HAProxy in TCP mode (`deploy/edge/haproxy.cfg`). Vanilla
-  clients speak plain TCP, so TLS needs a client mod (or a tunnel); whether edges stay HAProxy or
-  become our own Kotlin ingest service is open (GitHub issue).
-* **Velocity (main)**: one proxy that knows all Minecraft servers; modern forwarding to the Fabric
-  servers (FabricProxy-Lite). Our plugins: `velocity/`.
+* **Edge Velocity proxies** (3, spread across the world; [design](https://claude.ai/artifact/WDswfCSv1YSxbGT7HWgtzd)):
+  players connect to the nearest edge, which authenticates them and modern-forwards straight to the
+  Fabric servers (FabricProxy-Lite) through a WireGuard tunnel to the core host. There is no main
+  Velocity. An edge may sit behind an L4 DDoS filter that sends PROXY protocol v2; only such an edge
+  runs with `haproxy-protocol = true`. Locally (`deploy/compose.yaml`) edge 3 is behind an HAProxy
+  stand-in for the filter. Every edge renders its config from `deploy/edge-velocity/velocity.toml`
+  and loads our plugins (`velocity/`). WireGuard and the cross-edge player registry are #22 and #23.
 * **Lobby servers**: one process each; Fabric + VMP, Async, FerriteCore, our mods.
+  The lobby world holds no state: a flat world of one grass layer at y=-64 with the spawn on top of it
+  at 0/-63/0, its chunks kept loaded, no time, weather or mobs (`deploy/fabric/lobby`: server.properties
+  and the datapack `world/datapacks/blocks168-lobby`). Staging deletes a lobby world generated from
+  other files there, so every checkout gets the same lobby.
 * **Main game server**: one process; Fabric + C2ME, VMP, ScalableLux, Async, FerriteCore, our mods.
+  Its world keeps the 3x3 chunks around the world spawn force-loaded (data pack
+  `deploy/fabric/survival/world/datapacks/blocks168-spawn`, #53): with C2ME's chunk system, finding a
+  new player's spawn in chunks that still have to load could fail the join.
 * **Creative testing servers**: one per player (they can invite others), several `MinecraftServer`
   instances in one JVM, started and stopped quickly. Not created yet (GitHub issue).
 * **Backend**: Ktor (`backend/`); HTTP API (model in `libs/api`) and the web frontend.

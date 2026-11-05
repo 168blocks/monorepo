@@ -1,7 +1,7 @@
 package net.blocks168.mod.example
 
 import net.blocks168.common.ServerHello
-import net.blocks168.pgecs.PgEcs
+import net.blocks168.pgecs.db.Database
 import net.blocks168.pgecs.PgEcsConfig
 import net.fabricmc.api.ModInitializer
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents
@@ -23,7 +23,7 @@ object ExampleMod : ModInitializer {
     var ticks: Long = 0
         private set
 
-    private var ecs: PgEcs? = null
+    private var ecs: Database? = null
 
     /** This server's id in the network (`BLOCKS_SERVER_ID`, set by deploy/compose.yaml) */
     val serverId: String = System.getenv("BLOCKS_SERVER_ID") ?: "dev"
@@ -31,7 +31,7 @@ object ExampleMod : ModInitializer {
     override fun onInitialize() {
         ServerLifecycleEvents.SERVER_STARTED.register { server ->
             if (System.getenv("PGECS_URL") != null) {
-                ecs = runCatching { PgEcs.connectWithRetry(PgEcsConfig.fromEnv()) }
+                ecs = runCatching { Database.connectWithRetry(PgEcsConfig.fromEnv().copy(applicationName = "mc-$serverId")) }
                     .onSuccess { log.info("pgecs connected: {}", it.ping()) }
                     .onFailure { log.error("pgecs connection failed", it) }
                     .getOrNull()

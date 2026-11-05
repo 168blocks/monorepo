@@ -22,7 +22,7 @@ import de.connect2x.trixnity.core.model.events.m.room.RoomMessageEventContent
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import net.blocks168.pgecs.PgEcs
+import net.blocks168.pgecs.db.Database
 import net.blocks168.pgecs.testing.TestPostgres
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -37,13 +37,13 @@ import kotlin.time.Duration.Companion.seconds
  */
 class MatrixBotTest {
     private lateinit var homeserver: TestHomeserver
-    private lateinit var ecs: PgEcs
+    private lateinit var ecs: Database
     private val closeables = mutableListOf<AutoCloseable>()
 
     @BeforeTest
     fun setUp() {
         homeserver = TestHomeserver("bot", "alice")
-        ecs = PgEcs.connect(TestPostgres.config)
+        ecs = Database.connect(TestPostgres.config)
     }
 
     @AfterTest
@@ -58,11 +58,11 @@ class MatrixBotTest {
     private fun botConfig() = MatrixBotConfig(homeserver.baseUrl, "bot", TestHomeserver.PASSWORD, deviceId = "BOTDEVICE")
 
     private suspend fun startBot() =
-        MatrixBot.start(botConfig(), MatrixStore(ecs, TestPostgres.config, botSchema)).also { closeables += it }
+        MatrixBot.start(botConfig(), MatrixStore(ecs, botSchema)).also { closeables += it }
 
     /** A player's client, with its own store, as a Matrix client app would have. */
     private suspend fun startPlayer(name: String): MatrixClient {
-        val store = MatrixStore(ecs, TestPostgres.config, "matrix_${name}_${System.nanoTime()}").also { it.migrate() }
+        val store = MatrixStore(ecs, "matrix_${name}_${System.nanoTime()}").also { it.migrate() }
         val client = MatrixClient.create(
             repositoriesModule = RepositoriesModule.exposed(store.database()),
             mediaStoreModule = MediaStoreModule.inMemory(),

@@ -2,7 +2,7 @@ package net.blocks168.backend
 
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
-import net.blocks168.pgecs.PgEcs
+import net.blocks168.pgecs.db.Database
 import net.blocks168.pgecs.PgEcsConfig
 import net.blocks168.backend.matrix.startMatrixBot
 import java.io.File
@@ -17,7 +17,7 @@ import java.io.File
 fun main() {
     val port = System.getenv("BLOCKS_HTTP_PORT")?.toInt() ?: 8080
     val frontend = System.getenv("BLOCKS_FRONTEND_DIR")?.let(::File)
-    val ecs = PgEcs.connectWithRetry(PgEcsConfig.fromEnv())
+    val ecs = Database.connectWithRetry(PgEcsConfig.fromEnv().copy(applicationName = "backend"))
     val counter = PgCounterStore(ecs).also { it.migrate() }
     startMatrixBot(ecs)
     embeddedServer(Netty, port = port, host = "0.0.0.0") {

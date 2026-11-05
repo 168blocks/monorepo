@@ -5,8 +5,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import net.blocks168.pgecs.PgEcs
-import net.blocks168.pgecs.PgEcsConfig
+import net.blocks168.pgecs.db.Database
 import org.slf4j.LoggerFactory
 
 private val log = LoggerFactory.getLogger("net.blocks168.backend.matrix.MatrixStartup")
@@ -16,14 +15,13 @@ private val log = LoggerFactory.getLogger("net.blocks168.backend.matrix.MatrixSt
  * slow or unreachable homeserver never holds up the backend. Returns the job, or null when the bot is off.
  */
 fun startMatrixBot(
-    ecs: PgEcs,
+    db: Database,
     config: MatrixBotConfig? = MatrixBotConfig.fromEnv(),
-    dbConfig: PgEcsConfig = PgEcsConfig.fromEnv(),
     scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) = config?.let {
     scope.launch {
         runCatching {
-            val bot = MatrixBot.start(config, MatrixStore(ecs, dbConfig))
+            val bot = MatrixBot.start(config, MatrixStore(db))
             config.announceRoom?.let { MatrixExamples.announceStartup(bot, RoomId(it)) }
         }.onFailure { log.error("Matrix bot did not start", it) }
     }
