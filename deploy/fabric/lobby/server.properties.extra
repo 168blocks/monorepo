@@ -4,4 +4,10 @@ server-ip=10.168.0.1
 motd=168blocks lobby
 level-name=world
 gamemode=adventure
+# A flat world of one grass layer at the bottom of the world (y=-64), nothing else: players stand on
+# y=-63 everywhere, the whole lobby is a free walking area, and it looks the same on every checkout.
+# Spawn point, forced spawn chunks and game rules: the datapack in world/datapacks/blocks168-lobby.
+level-type=minecraft\:flat
+generator-settings={"layers"\:[{"block"\:"minecraft\:grass_block","height"\:1}],"biome"\:"minecraft\:plains","features"\:false,"lakes"\:false}
+level-seed=168
 generate-structures=false

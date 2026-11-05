@@ -26,7 +26,14 @@ pgecs). Java 25 is the minimum: Minecraft 26.3 and Velocity 4.3 require it.
   the core's own addresses and `10.168.0.1`; PostgreSQL picks the role by tunnel subnet (no NAT, no
   passwords). Removing a peer on the hub revokes that machine.
 * **Lobby servers**: one process each; Fabric + VMP, Async, FerriteCore, our mods.
+  The lobby world holds no state: a flat world of one grass layer at y=-64 with the spawn on top of it
+  at 0/-63/0, its chunks kept loaded, no time, weather or mobs (`deploy/fabric/lobby`: server.properties
+  and the datapack `world/datapacks/blocks168-lobby`). Staging deletes a lobby world generated from
+  other files there, so every checkout gets the same lobby.
 * **Main game server**: one process; Fabric + C2ME, VMP, ScalableLux, Async, FerriteCore, our mods.
+  Its world keeps the 3x3 chunks around the world spawn force-loaded (data pack
+  `deploy/fabric/survival/world/datapacks/blocks168-spawn`, #53): with C2ME's chunk system, finding a
+  new player's spawn in chunks that still have to load could fail the join.
 * **Creative testing servers**: one per player (they can invite others), several `MinecraftServer`
   instances in one JVM, started and stopped quickly. Not created yet (GitHub issue).
 * **Backend**: Ktor (`backend/`); HTTP API (model in `libs/api`) and the web frontend.
