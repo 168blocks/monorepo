@@ -49,6 +49,7 @@ class ExpiryTest {
                 // the index is valid and is what the sweep's predicate uses
                 val plan = ecs.database.read {
                     connection.createStatement().use { st ->
+                        st.execute("set local enable_seqscan = off") // the test table is tiny
                         st.executeQuery(
                             "explain select entity from ecs_component c0 where c0.rel = 'b8:util:expires-slow:v1' " +
                                 "and (c0.value#>>'{}')::bigint < 0",
