@@ -25,6 +25,13 @@ pgecs). Java 25 is the minimum: Minecraft 26.3 and Velocity 4.3 require it.
   the Fabric servers (lobby 25601, survival 25602) and later the backend's internal port listen only on
   the core's own addresses and `10.168.0.1`; PostgreSQL picks the role by tunnel subnet (no NAT, no
   passwords). Removing a peer on the hub revokes that machine.
+* **Player DNS** ([`dns.md`](dns.md)): players find the edges by name. PowerDNS (authoritative, from
+  Nix) holds no data; its remote backend asks the `dns/` service (Ktor), which answers from the edges
+  in PostgreSQL (`dns.edges`: region, public address, health). `play.<zone>` is GeoDNS (nearest
+  healthy edges by EDNS client subnet or resolver address, through a prefix table), `<region>.<zone>`
+  the fallback per region, with SRV records `_minecraft._tcp.*` for ports. Unhealthy edges (status
+  ping fails, heartbeat stale) drop out within seconds; TTL 60 s. Cloudflare serves only the web UI,
+  never the Minecraft names.
 * **Lobby servers**: one process each; Fabric + VMP, Async, FerriteCore, our mods.
   The lobby world holds no state: a flat world of one grass layer at y=-64 with the spawn on top of it
   at 0/-63/0, its chunks kept loaded, no time, weather or mobs (`deploy/fabric/lobby`: server.properties
@@ -58,3 +65,7 @@ and `wg0` on a `wan` network that only reaches core's WireGuard port (and the pu
 `wg0.conf` into `deploy/build/wireguard/`; `nix/wg-up.sh` (in the runtime image) brings `wg0` up with
 the kernel module, or with userspace `wireguard-go` on `/dev/net/tun` where the module is missing. The
 containers with a `wg0` need `NET_ADMIN`.
+
+The player DNS runs in the core namespace too: `dns` (the Kotlin service, HTTP on localhost only) and
+`pdns` (PowerDNS, `nix build .#pdns-image`), whose port 53 is published on 127.0.0.1 at
+`BLOCKS_DNS_PORT` (10053 + 10·slot) for the zone `168blocks.test`.

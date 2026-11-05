@@ -36,6 +36,7 @@ let
       (root + "/build-logic")
       (root + "/libs")
       (root + "/backend")
+      (root + "/dns")
       (root + "/frontend")
       (root + "/velocity")
       (root + "/e2e")

@@ -195,6 +195,30 @@
             };
           };
 
+          # PowerDNS authoritative server for the player zone (deploy/compose.yaml: pdns, docs/dns.md). All
+          # answers come from the dns service through the remote backend; the config is mounted at
+          # /etc/pdns/pdns.conf (deploy/dns/pdns.conf).
+          pdns-image = pkgs.dockerTools.buildLayeredImage {
+            name = "localhost/168blocks/pdns";
+            # tag = content hash chosen by Nix (tools/network.sh reads it), so worktrees never share a tag
+            tag = null;
+            contents = [
+              pkgs.pdns
+              pkgs.dockerTools.fakeNss
+            ];
+            extraCommands = "mkdir -p tmp etc/pdns && chmod 1777 tmp";
+            config = {
+              Entrypoint = [
+                "${pkgs.pdns}/bin/pdns_server"
+                "--config-dir=/etc/pdns"
+              ];
+              ExposedPorts = {
+                "53/udp" = { };
+                "53/tcp" = { };
+              };
+            };
+          };
+
           # Runtime image for every JVM service in deploy/compose.yaml. The services mount their staged
           # files (deploy/build/stage/<service>) at /srv, so the image only changes with the JRE.
           # Also the WireGuard tooling (nix/wg-up.sh): the core container and the edges bring up their
