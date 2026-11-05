@@ -6,6 +6,11 @@
 #   tools/network.sh down [-v]            stop (-v also deletes the database and S3 volumes)
 #   tools/network.sh logs [service]
 #   tools/network.sh ps
+#   tools/network.sh env                  this checkout's instance slot, ports, compose project
+#   tools/network.sh instances            all checkouts' slots on this machine
+#
+# Every checkout (worktree) gets its own compose project, volumes and host ports (tools/instance.sh),
+# so several networks can run side by side.
 #
 # The Minecraft servers (lobby, survival) only start once you accept the Minecraft EULA
 # (https://aka.ms/MinecraftEULA): set BLOCKS_ACCEPT_EULA=true. Without it, they exit at startup and the
@@ -13,23 +18,23 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 [ -n "${IN_NIX_SHELL:-}" ] || exec ./dev "$0" "$@"
+BLOCKS_ROOT=$PWD . tools/instance.sh
 
 # podman and podman-compose come from the dev shell (flake.nix, nix/podman.nix). Started containers
 # would inherit our stdout/stderr; detach them so callers piping our output are not kept waiting.
-compose() { podman-compose -f deploy/compose.yaml "$@" </dev/null; }
+compose() { podman-compose -p "$BLOCKS_COMPOSE_PROJECT" -f deploy/compose.yaml "$@" </dev/null; }
 
 stage() {
   local eula=false
   [ "${BLOCKS_ACCEPT_EULA:-}" = true ] && eula=true
   ./gradlew --console=plain -q :deploy:stage "-PacceptMinecraftEula=$eula"
-  # Nix-built images (flake.nix); only reloaded when their store path changes
-  local name image
+  # Nix-built images (flake.nix), tagged with the hash of their store path; loaded once per version
+  local name image ref
   for name in runtime postgres; do
     image=$(nix build --no-link --print-out-paths ".#$name-image")
-    if [ "$(cat "deploy/build/$name-image" 2>/dev/null)" != "$image" ] || ! podman image exists "localhost/168blocks/$name:latest"; then
-      podman load -q -i "$image"
-      echo "$image" > "deploy/build/$name-image"
-    fi
+    ref="localhost/168blocks/$name:$(basename "$image" | cut -d- -f1)"
+    podman image exists "$ref" || podman load -q -i "$image"
+    export "BLOCKS_$(echo "$name" | tr a-z A-Z)_IMAGE=$ref"
   done
 }
 
@@ -54,16 +59,23 @@ case "$cmd" in
   up)
     stage
     compose up -d "$@"
+    echo "network $BLOCKS_COMPOSE_PROJECT: edges 127.0.0.1:$BLOCKS_EDGE1_PORT-$BLOCKS_EDGE3_PORT, backend $BLOCKS_E2E_BACKEND"
     ;;
   test)
     stage
     compose up -d
-    for port in 25501 25502 25503; do wait_port 127.0.0.1 $port 60; done
-    wait_http http://127.0.0.1:8080/api/health 120
+    for port in "$BLOCKS_EDGE1_PORT" "$BLOCKS_EDGE2_PORT" "$BLOCKS_EDGE3_PORT"; do wait_port 127.0.0.1 "$port" 60; done
+    wait_http "$BLOCKS_E2E_BACKEND/api/health" 120
     ./gradlew --console=plain :e2e:test -Pe2e "$@"
     ;;
   down) compose down "$@" ;;
+  env) env | grep -E '^BLOCKS_(INSTANCE_SLOT|COMPOSE_PROJECT|.*_PORT|E2E_.*)=' | sort ;;
+  instances)
+    for d in "${XDG_DATA_HOME:-$HOME/.local/share}"/168blocks/instances/*/; do
+      [ -f "$d/path" ] && printf '%s\t%s\n' "$(basename "$d")" "$(cat "$d/path")"
+    done
+    ;;
   logs) compose logs "$@" ;;
   ps) compose ps ;;
-  *) sed -n '2,13p' "$0"; exit 2 ;;
+  *) sed -n '2,18p' "$0"; exit 2 ;;
 esac

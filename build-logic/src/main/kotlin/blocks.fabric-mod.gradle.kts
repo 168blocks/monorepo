@@ -27,3 +27,11 @@ tasks.named<ProcessResources>("processResources") {
     inputs.properties(props)
     filesMatching("fabric.mod.json") { expand(props) }
 }
+
+// `gradlew runServer` listens on this checkout's port (tools/instance.sh), so dev servers of several
+// worktrees can run at once.
+extensions.configure<net.fabricmc.loom.api.LoomGradleExtensionAPI> {
+    runs.named("server") {
+        programArgs("--port", System.getenv("BLOCKS_DEV_SERVER_PORT") ?: "25565")
+    }
+}
