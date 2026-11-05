@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "cohost-fixes",
+  "version": "${version}",
+  "name": "168blocks co-host fixes",
+  "description": "Makes several MinecraftServers in one JVM independent: stopping, hanging or crashing one does not exit the JVM, shut down the shared executors or crash the others.",
+  "authors": ["168blocks"],
+  "license": "proprietary",
+  "environment": "*",
+  "entrypoints": {
+    "main": [{ "adapter": "kotlin", "value": "dev.vxcc.b8.mod.cohostfixes.CohostFixesMod" }]
+  },
+  "mixins": ["cohost-fixes.mixins.json"],
+  "depends": {
+    "fabricloader": ">=${fabricLoader}",
+    "fabric-api": "*",
+    "fabric-language-kotlin": ">=${fabricKotlin}",
+    "minecraft": "~${minecraft}",
+    "java": ">=${java}"
+  }
+}

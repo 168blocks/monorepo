@@ -17,6 +17,7 @@ include(":libs:pgecs-eqsat") // equality saturation (egglog on Endive) for the p
 include(":libs:pgecs-ksp") // KSP processor: pgecs query infix relations and write accessors
 include(":libs:pgecs-lambda") // bytecode decompiler for pgecs query lambdas (where, select, orderBy, ...)
 include(":libs:pgecs-query") // pgecs query engine: planner, eqsat optimisation, SQL compiler, plan cache
+include(":libs:static-guard") // finds and contains static state shared by instances co-hosted in one JVM (#6)
 include(":libs:vodozemac-endive") // vodozemac (Matrix E2EE) as wasm on Endive, for the backend's Trixnity
 include(":libs:b8-util") // b8 modules on pgecs systems: expiry
 include(":libs:api") // Kotlin Multiplatform backend API model, shared with the frontend
@@ -40,6 +41,8 @@ if (providers.gradleProperty("blocks.minecraft").orNull != "false") {
     include(":mods:example-common") // Fabric mod (Kotlin + Java mixins), server and client
     include(":mods:e2e-client") // dev-only client mod: local RPC for end-to-end tests with real game clients
     include(":mods:e2e-agent") // dev only: server state over HTTP for the e2e tests
+    include(":mods:cohost-fixes") // several MinecraftServers in one JVM: no JVM exit, shared executors (#6)
+    include(":mods:cohost-test") // dev only: co-hosting test under the static-guard agent (:mods:cohost-test:cohostTest)
     include(":mods:creative-host") // extra MinecraftServers in a running server's JVM, started fast (#6)
     include(":deploy") // stages the podman compose network (deploy/compose.yaml)
 }

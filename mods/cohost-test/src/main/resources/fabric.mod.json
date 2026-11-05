@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "cohost-test",
+  "version": "${version}",
+  "name": "168blocks co-host test",
+  "description": "Dev-only: starts, crashes, hangs and stops extra MinecraftServers in the main server's JVM and checks the others survive (:mods:cohost-test:cohostTest). Never deploy.",
+  "authors": ["168blocks"],
+  "license": "proprietary",
+  "environment": "server",
+  "entrypoints": {
+    "server": [{ "adapter": "kotlin", "value": "dev.vxcc.b8.mod.cohosttest.CohostTestMod" }]
+  },
+  "depends": {
+    "fabricloader": ">=${fabricLoader}",
+    "fabric-api": "*",
+    "fabric-language-kotlin": ">=${fabricKotlin}",
+    "minecraft": "~${minecraft}",
+    "java": ">=${java}",
+    "cohost-fixes": "*"
+  }
+}

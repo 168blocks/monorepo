@@ -171,6 +171,24 @@ jobs:
       - name: Network tests
         run: tools/network.sh test
 
+      # several MinecraftServers in one JVM under the static-guard agent (docs/co-hosting.md); runs even
+      # when the network tests failed, it does not use the network
+      - name: Co-hosting test
+        if: success() || failure()
+        run: ./dev ./gradlew --console=plain :mods:cohost-test:cohostTest "-PacceptMinecraftEula=$BLOCKS_ACCEPT_EULA"
+
+      - name: Co-hosting test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cohost-test
+          path: |
+            mods/cohost-test/build/cohost-test/server.log
+            mods/cohost-test/build/cohost-test/static-guard-report.txt
+            mods/cohost-test/build/cohost-test/cohost-test-result.txt
+            mods/cohost-test/build/cohost-test/crash-reports/
+          if-no-files-found: ignore
+
       # tests that need a service the network lacks are skipped, not failed: show the counts
       - name: Test summary
         if: always()

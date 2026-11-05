@@ -1,0 +1,16 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "dev.vxcc.b8.mod.cohostfixes.mixin",
+  "plugin": "dev.vxcc.b8.mod.cohostfixes.mixin.CohostMixinPlugin",
+  "compatibilityLevel": "JAVA_25",
+  "mixins": [
+    "BlockableEventLoopAccessor",
+    "BlockableEventLoopMixin",
+    "C2meShutdownExitMixin",
+    "DedicatedServerMixin",
+    "MinecraftServerMixin",
+    "ServerWatchdogMixin"
+  ],
+  "injectors": { "defaultRequire": 1 }
+}

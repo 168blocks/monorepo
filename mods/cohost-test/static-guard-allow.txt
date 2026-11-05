@@ -1,0 +1,2 @@
+# Statics that several co-hosted servers write on purpose (reviewed); one owner/Name.field per line,
+# with the reason after it.
