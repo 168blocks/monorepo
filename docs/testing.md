@@ -45,6 +45,11 @@ scenario("second player sees the first in the lobby") {
   address (as `blocks` it is rejected) and reaches the Fabric servers only through the tunnel; with its
   peer removed from the hub an edge refuses logins (a bot), and lets players in again once restored.
   Nothing reaches PostgreSQL through a host port.
+* `DnsTest`: the player DNS ([`dns.md`](dns.md)) through `Dns`, a small DNS client (UDP, TCP, EDNS
+  client subnet) at `BLOCKS_E2E_DNS`: SOA/NS/NXDOMAIN of the zone, each region's healthy edges (SRV
+  ports tell the edges apart, they share 127.0.0.1), `play` by client subnet with fallback and the ECS
+  scope echoed, and test edges inserted into `dns.edges` (through `ComposeNetwork`) dropping out when
+  their probe fails or they are disabled.
 * Server-side agents (see "Server-side assertions" below): `ServerAgent` / `ProxyAgent` in
   `e2e/.../agent/`; `AgentTest` checks that Velocity reports its servers and that both Fabric servers
   report their worlds and run commands (`list`). The Fabric server tests are skipped unless

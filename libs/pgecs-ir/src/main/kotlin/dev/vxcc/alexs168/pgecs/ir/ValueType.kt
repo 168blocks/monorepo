@@ -23,21 +23,27 @@ package dev.vxcc.alexs168.pgecs.ir
  * [nullable] is the declared nullability (a `String?` field, an optional parameter). A non-null
  * field of a variable bound only inside an [Term.Optional] can still evaluate to null outside of it;
  * see [Nullability].
+ *
+ * [list] types (`text[]`) are lists of non-null values of [kind]. Only parameters have them, the
+ * right side of [Functions.IN] (`it.name in names`); lists stored in component values are [Kind.JSON].
  */
-data class ValueType(val kind: Kind, val nullable: Boolean = false) {
+data class ValueType(val kind: Kind, val nullable: Boolean = false, val list: Boolean = false) {
 
     enum class Kind { BOOL, INT, FLOAT, TEXT, UUID, INSTANT, DURATION, JSON }
 
     val isNumeric: Boolean get() = kind == Kind.INT || kind == Kind.FLOAT
 
     /** Whether values of the kind have a total order that SQL and Kotlin agree on (`<`, `orderBy`). */
-    val isOrdered: Boolean get() = kind != Kind.BOOL && kind != Kind.JSON
+    val isOrdered: Boolean get() = !list && kind != Kind.BOOL && kind != Kind.JSON
 
     fun asNullable(): ValueType = if (nullable) this else copy(nullable = true)
 
     fun asNonNull(): ValueType = if (nullable) copy(nullable = false) else this
 
-    override fun toString(): String = kind.name.lowercase() + if (nullable) "?" else ""
+    /** The type of one element of this list type. */
+    fun element(): ValueType = ValueType(kind)
+
+    override fun toString(): String = kind.name.lowercase() + (if (list) "[]" else "") + if (nullable) "?" else ""
 
     companion object {
         @JvmField val BOOL = ValueType(Kind.BOOL)
@@ -48,5 +54,9 @@ data class ValueType(val kind: Kind, val nullable: Boolean = false) {
         @JvmField val INSTANT = ValueType(Kind.INSTANT)
         @JvmField val DURATION = ValueType(Kind.DURATION)
         @JvmField val JSON = ValueType(Kind.JSON)
+
+        /** A list of non-null [kind] values. */
+        @JvmStatic
+        fun listOf(kind: Kind): ValueType = ValueType(kind, list = true)
     }
 }
