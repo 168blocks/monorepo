@@ -90,6 +90,7 @@ fun ComponentType.toSpec(): ComponentSpec = when (this) {
         ComponentKind.VALUE,
         jsonSchema = JsonSchemas.of(serializer.descriptor).toString(),
         indexes = indexes,
+        rules = sqlRules,
     )
     is Capability<*> -> ComponentSpec(name, ComponentKind.CAPABILITY, jsonSchema = JsonSchemas.of(serializer.descriptor).toString())
 }

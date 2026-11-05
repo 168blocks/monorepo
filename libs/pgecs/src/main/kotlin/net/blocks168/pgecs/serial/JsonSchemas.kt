@@ -92,6 +92,12 @@ object JsonSchemas {
         when (name) {
             InstantAsEpochMillis.SERIAL_NAME, DurationAsMillis.SERIAL_NAME ->
                 return JsonObject(mapOf("type" to JsonPrimitive("integer")) + constraints)
+            // kotlinx.serialization.json's own tree types: any JSON
+            "kotlinx.serialization.json.JsonElement", "kotlinx.serialization.json.JsonPrimitive",
+            "kotlinx.serialization.json.JsonLiteral" -> return JsonObject(emptyMap())
+            "kotlinx.serialization.json.JsonObject" -> return buildJsonObject { put("type", "object") }
+            "kotlinx.serialization.json.JsonArray" -> return buildJsonObject { put("type", "array") }
+            "kotlinx.serialization.json.JsonNull" -> return buildJsonObject { put("type", "null") }
             UuidAsString.SERIAL_NAME, "kotlin.uuid.Uuid" ->
                 return JsonObject(mapOf("type" to JsonPrimitive("string"), "format" to JsonPrimitive("uuid")) + constraints)
         }

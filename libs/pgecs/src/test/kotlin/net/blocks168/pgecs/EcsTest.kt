@@ -12,7 +12,9 @@ import kotlin.test.assertTrue
 import kotlinx.serialization.Serializable
 import net.blocks168.pgecs.db.Database
 import net.blocks168.pgecs.dsl.QueryResultException
+import net.blocks168.pgecs.ir.parameterize
 import net.blocks168.pgecs.query.QueryEngineConfig
+import net.blocks168.pgecs.query.sql.Bind
 import net.blocks168.pgecs.schema.CoreComponents
 import net.blocks168.pgecs.schema.IndexSpec
 import net.blocks168.pgecs.serial.InstantAsEpochMillis
@@ -29,12 +31,20 @@ data class Score(val points: Long)
 
 object MailComponent : Component<Mail>("test:ecs:mail:v1") {
     init {
-        index(IndexSpec("address", listOf("(lower(value->>'address'))"), unique = true))
+        unique("address") { it.address.lowercase() }
         validate("no spaces") { !it.address.contains(' ') }
     }
 }
 
 object ScoreComponent : Component<Score>("test:ecs:score:v1")
+
+@Serializable
+enum class Rank { @kotlinx.serialization.SerialName("gold") GOLD, SILVER }
+
+@Serializable
+data class Badge(val rank: Rank, val owner: String)
+
+object BadgeComponent : Component<Badge>("test:ecs:badge:v1")
 object Member : Tag("test:ecs:member")
 object Muted : Tag("test:ecs:muted")
 object Likes : Relation("test:ecs:likes")
@@ -47,7 +57,7 @@ class EcsTest {
     private val ecs = Pgecs.on(database) {
         loadModules = false
         engine = QueryEngineConfig(eqsatInstances = 0)
-        register(MailComponent, ScoreComponent, Member, Muted, Likes, Leads)
+        register(MailComponent, ScoreComponent, BadgeComponent, Member, Muted, Likes, Leads)
     }.also { it.freeze() }
 
     @AfterAll
@@ -183,6 +193,32 @@ class EcsTest {
         val bad = assertFailsWith<SQLException> { ecs.tx { create { this[MailComponent] = Mail("not-an-address") } } }
         assertEquals("EC005", bad.sqlState)
         assertFailsWith<ComponentValidationException> { ecs.tx { create { this[MailComponent] = Mail("a b@c") } } }
+        // the same rule holds in Postgres for writes that do not go through Kotlin
+        val e = ecs.tx { create { } }
+        val raw = assertFailsWith<SQLException> {
+            ecs.database.tx {
+                connection.prepareStatement("insert into ecs_component (entity, rel, value) values (?, ?, ?::jsonb)").use {
+                    it.setObject(1, e.id); it.setString(2, MailComponent.name); it.setString(3, """{"address":"x y@z"}""")
+                    it.executeUpdate()
+                }
+            }
+        }
+        assertEquals("EC011", raw.sqlState)
+    }
+
+    @Test
+    fun `rules render to SQL unless they are Kotlin-only, and untranslatable ones are refused`() {
+        assertEquals(listOf("no spaces"), MailComponent.toSpec().rules.map { it.description })
+        val kotlinOnly = object : Component<Score>("test:ecs:kotlin-only:v1") {
+            init { validate("odd", kotlinOnly = true) { it.points.hashCode() % 2 == 1 } }
+        }
+        assertEquals(emptyList(), kotlinOnly.toSpec().rules)
+        assertFailsWith<ComponentValidationException> { kotlinOnly.check(Score(2)) }
+        val untranslatable = object : Component<Score>("test:ecs:untranslatable:v1") {
+            init { validate("odd") { it.points.hashCode() % 2 == 1 } }
+        }
+        val e = assertFailsWith<net.blocks168.pgecs.dsl.QueryBuildException> { untranslatable.toSpec() }
+        assertTrue("kotlinOnly" in e.message!!, e.message)
     }
 
     @Test
@@ -238,6 +274,28 @@ class EcsTest {
     }
 
     @Test
+    fun `enum values in queries compare by their serial names`() {
+        val owner = "b${UUID.randomUUID()}"
+        val (gold, silver) = ecs.tx {
+            create { this[BadgeComponent] = Badge(Rank.GOLD, owner) } to create { this[BadgeComponent] = Badge(Rank.SILVER, owner) }
+        }
+        for ((rank, expected) in listOf(Rank.GOLD to gold, Rank.SILVER to silver)) {
+            val captured = ecs.query {
+                val e by entity
+                e has BadgeComponent.where { it.owner == owner && it.rank == rank }
+                select { e }
+            }.fetch()
+            assertEquals(listOf(expected), captured, "captured $rank")
+        }
+        val literal = ecs.query {
+            val e by entity
+            e has BadgeComponent.where { it.owner == owner && it.rank == Rank.GOLD }
+            select { e }
+        }.fetch()
+        assertEquals(listOf(gold), literal)
+    }
+
+    @Test
     fun `a failed savepoint discards its buffered writes`() {
         val e = ecs.tx {
             val e = create { +Member }
@@ -286,6 +344,97 @@ class EcsTest {
                 assertTrue(found.registry[t.name] === t, "${t.name} not registered")
             }
         }
+    }
+
+    @Test
+    fun `hooks run in the transaction and tell adds from sets`() {
+        Pgecs.on(database) {
+            loadModules = false
+            engine = QueryEngineConfig(eqsatInstances = 0)
+            register(MailComponent, ScoreComponent, Member, Muted, Likes, Leads)
+        }.use { hooked ->
+            hooked.freeze()
+            val log = ArrayList<String>()
+            hooked.hooks.onAdd(Member) { e -> log += "add member"; update(e.entity) { this[ScoreComponent] = Score(0) } }
+            hooked.hooks.onSet(ScoreComponent) { _, v -> log += "set ${v.points}" }
+            hooked.hooks.onRemove(Member) { log += "remove member" }
+            hooked.hooks.onRemove(Leads) { e -> log += "unlead ${e.target == null}" }
+            hooked.hooks.onAdd(Leads) { log += "lead" }
+            val (a, b) = hooked.tx { create() to create() }
+            val e = hooked.tx { create { +Member; +Member } }
+            hooked.tx { update(e) { this[ScoreComponent] = Score(5); set(Leads, a); set(Leads, b); -Member } }
+            assertEquals(listOf("add member", "set 0", "set 5", "lead", "unlead false", "lead", "remove member"), log)
+            hooked.read { assertEquals(Score(5), get(e, ScoreComponent)) }
+            // a throwing hook rolls the transaction back
+            hooked.hooks.onAdd(Muted) { error("no muting") }
+            assertFailsWith<IllegalStateException> { hooked.tx { update(e) { +Muted; this[ScoreComponent] = Score(9) } } }
+            hooked.read { assertEquals(Score(5), get(e, ScoreComponent)) }
+        }
+    }
+
+    @Test
+    fun `hot query shapes are recorded and pre-compiled at the next freeze`() {
+        val kind = "test-${UUID.randomUUID()}"
+        fun open() = Pgecs.on(database) {
+            loadModules = false
+            processKind = kind
+            engine = QueryEngineConfig(eqsatInstances = 0)
+            register(MailComponent, ScoreComponent, Member, Muted, Likes, Leads)
+        }.also { it.freeze() }
+        open().use { first ->
+            first.query { val m by entity; m has Member; select { m } }.count()
+        } // close records the shapes
+        open().use { second ->
+            val deadline = System.nanoTime() + 10_000_000_000
+            while (second.engine.metrics().cachedPlans == 0L && System.nanoTime() < deadline) Thread.sleep(20)
+            assertTrue(second.engine.metrics().cachedPlans > 0, "nothing pre-compiled")
+        }
+    }
+
+    @Test
+    fun `unique lambdas render exactly what queries use`() {
+        assertEquals(listOf(IndexSpec("address", listOf("(lower(value->>'address'))"), unique = true)), MailComponent.indexes)
+        val addr = "Idx${UUID.randomUUID()}@x"
+        val plan = ecs.read {
+            val q = query {
+                val m by entity
+                m has MailComponent.where { it.address.lowercase() == addr.lowercase() }
+                select { m }
+            }
+            val bound = q.ir.parameterize(q.params)
+            val compiled = ecs.engine.compile(bound.shape).sql!!
+            connection.createStatement().use { it.execute("set local enable_seqscan = off") } // the test table is tiny
+            connection.prepareStatement("explain ${compiled.sql}").use { st ->
+                compiled.binds.forEachIndexed { i, b ->
+                    when (b) {
+                        is Bind.Param -> st.setObject(i + 1, bound.arguments[b.index])
+                        is Bind.Const -> st.setObject(i + 1, b.value)
+                        Bind.Now -> st.setLong(i + 1, 0)
+                    }
+                }
+                st.executeQuery().use { rs -> buildString { while (rs.next()) appendLine(rs.getString(1)) } }
+            }
+        }
+        assertTrue("ecs_" in plan && "address" in plan && "Index" in plan, plan)
+    }
+
+    @Test
+    fun `async and suspend transactions write and query like blocking ones`() {
+        val tag = "async${UUID.randomUUID()}"
+        val n = ecs.txAsync {
+            create { this[MailComponent] = Mail("$tag@a") }
+            query { val m by entity; m has MailComponent.where { it.address == "$tag@a" }; select { m } }.count()
+        }.get()
+        assertEquals(1, n)
+        val m = kotlinx.coroutines.runBlocking {
+            ecs.txSuspend { create { this[MailComponent] = Mail("$tag@b") } }
+            ecs.readSuspend {
+                kotlinx.coroutines.yield()
+                query { val m by entity; m has MailComponent.where { it.address == "$tag@b" }; select { m } }.count()
+            }
+        }
+        assertEquals(1, m)
+        assertEquals(1, ecs.readAsync { query { val x by entity; x has MailComponent.where { it.address == "$tag@a" }; select { x } }.count() }.get())
     }
 
     @Test
