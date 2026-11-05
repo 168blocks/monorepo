@@ -19,9 +19,9 @@ class HostedServer internal constructor(
     val id: String get() = spec.id
 
     /**
-     * Stops the server (saves its world) and waits for its thread to end unless [wait] is false. Without
-     * the `cohost-fixes` mod, C2ME ends the whole JVM here and vanilla shuts down the worker pools every
-     * server shares (#75).
+     * Stops the server (saves its world) and waits for its thread to end unless [wait] is false. The other
+     * servers keep running: `cohost-fixes` keeps C2ME from ending the JVM and vanilla from shutting down
+     * the worker pools every server shares (docs/co-hosting.md).
      */
     fun stop(wait: Boolean = true) {
         server.halt(wait)

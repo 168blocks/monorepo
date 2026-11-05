@@ -17,9 +17,7 @@
     "fabric-api": "*",
     "fabric-language-kotlin": ">=${fabricKotlin}",
     "minecraft": "~${minecraft}",
-    "java": ">=${java}"
-  },
-  "recommends": {
+    "java": ">=${java}",
     "cohost-fixes": "*"
   }
 }

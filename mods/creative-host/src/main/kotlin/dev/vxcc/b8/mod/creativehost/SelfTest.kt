@@ -16,8 +16,7 @@ import kotlin.system.exitProcess
  * up, starts two hosted servers from the template and one new flat world with the host's world datapacks
  * (all three share the host's resources), and one new world without them (loads its own). It checks
  * datapack data on each, that the shared resources are counted and survive stopping a server, logs
- * "creative host self test passed" or "FAILED" and halts the JVM with 0 or 1. Without `cohost-fixes`,
- * C2ME ends the JVM at the first stop (exit 0, no "passed" line). Ports: `server-port` + 1..4.
+ * "creative host self test passed" or "FAILED" and halts the JVM with 0 or 1. Ports: `server-port` + 1..4.
  */
 internal object SelfTest {
     private val log = LoggerFactory.getLogger("${CreativeHostMod.MOD_ID}/selftest")
