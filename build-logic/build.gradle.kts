@@ -10,4 +10,5 @@ dependencies {
     implementation(libs.compose.compiler.plugin)
     implementation(libs.compose.gradle.plugin)
     implementation(libs.loom.gradle.plugin)
+    implementation(libs.ksp.gradle.plugin)
 }

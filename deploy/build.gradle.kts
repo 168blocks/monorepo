@@ -231,11 +231,27 @@ val stageEdges = edges.map { (edge, haproxy) ->
     }
 }
 
-fun stageFabricServer(name: String, mods: Configuration) = tasks.register<Sync>("stage${name.replaceFirstChar(Char::uppercase)}") {
+// generatedWorld: the world holds no state and is generated from fabric/<name> (the lobby). A world staged
+// from other files there (an older world preset) is deleted, so the server generates it anew.
+fun stageFabricServer(name: String, mods: Configuration, generatedWorld: Boolean = false) = tasks.register<Sync>("stage${name.replaceFirstChar(Char::uppercase)}") {
     dependsOn(forwardingSecret)
     val secret = layout.buildDirectory.file("forwarding.secret")
     val eula = acceptEula
     inputs.property("eula", eula)
+    if (generatedWorld) {
+        val source = fileTree("fabric/$name")
+        val fingerprint = provider {
+            val sha = java.security.MessageDigest.getInstance("SHA-256")
+            source.visit { if (!isDirectory) { sha.update(relativePath.pathString.toByteArray()); sha.update(file.readBytes()) } }
+            java.util.HexFormat.of().formatHex(sha.digest())
+        }
+        doFirst {
+            val world = destinationDir.resolve("world")
+            val marker = world.resolve(".blocks168-source")
+            if (world.exists() && (!marker.exists() || marker.readText() != fingerprint.get())) world.deleteRecursively()
+        }
+        doLast { destinationDir.resolve("world/.blocks168-source").writeText(fingerprint.get()) }
+    }
     into(stageDir.map { it.dir(name) })
     from(fabricLauncher) { rename { "fabric-server-launch.jar" } }
     from(mods) { into("mods") }
@@ -269,7 +285,7 @@ fun stageFabricServer(name: String, mods: Configuration) = tasks.register<Sync>(
     }
 }
 
-val stageLobby = stageFabricServer("lobby", lobbyMods)
+val stageLobby = stageFabricServer("lobby", lobbyMods, generatedWorld = true)
 val stageSurvival = stageFabricServer("survival", survivalMods)
 
 // The network plugin's schema migrations, run as the database owner from the core (compose service
