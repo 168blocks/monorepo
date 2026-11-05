@@ -152,6 +152,27 @@ class EcsTest {
     }
 
     @Test
+    fun `deleting related entities in one transaction`() {
+        // found by ObserverModelTest: one statement deleting both ends of a pair failed, as the
+        // cascade of one end touched the other's row in the same command
+        val (parent, child, liked) = ecs.tx {
+            val p = create { +Member }
+            val l = create { +Member }
+            Triple(p, create { set(ChildOf, p); add(Likes, l) }, l)
+        }
+        ecs.tx {
+            delete(child)
+            delete(parent)
+            delete(liked)
+        }
+        ecs.read {
+            assertFalse(exists(parent))
+            assertFalse(exists(child))
+            assertFalse(exists(liked))
+        }
+    }
+
+    @Test
     fun `writes keep fields that a newer process wrote`() {
         val e = ecs.tx { create { this[ScoreComponent] = Score(1) } }
         // a newer JVM adds a field

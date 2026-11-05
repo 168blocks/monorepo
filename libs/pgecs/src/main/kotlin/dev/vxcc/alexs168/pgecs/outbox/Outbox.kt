@@ -21,6 +21,7 @@ import dev.vxcc.alexs168.pgecs.Relation
 import dev.vxcc.alexs168.pgecs.Sql
 import dev.vxcc.alexs168.pgecs.Tag
 import dev.vxcc.alexs168.pgecs.ChildOf
+import dev.vxcc.alexs168.pgecs.db.SqlStates
 import dev.vxcc.alexs168.pgecs.schema.ComponentIds
 import dev.vxcc.alexs168.pgecs.schema.IndexSpec
 import dev.vxcc.alexs168.pgecs.serial.PgecsJson
@@ -308,15 +309,39 @@ class Outbox internal constructor(private val ecs: Ecs, val config: OutboxConfig
     fun deliverOnce(e: Endpoint): Int {
         val me = e.id.id.toString()
         val claimed = claim(e, me)
+        // the claims last until about then (measured from after the claim, so a little longer)
+        val until = System.nanoTime() + config.lease.toNanos()
         for ((entity, entry) in claimed) {
             val capability = e.handlers.keys.first { it.name == entry.capability }
             val outcome = runCatching {
                 val payload = PgecsJson.decodeFromJsonElement(capability.serializer, entry.payload)
                 e.handlers.getValue(capability)(payload)
             }
-            if (outcome.isSuccess) complete(entity, me) else fail(entity, me, entry, outcome.exceptionOrNull()!!)
+            outcome.exceptionOrNull()?.let { error ->
+                failed.incrementAndGet()
+                LOG.log(System.Logger.Level.INFO, "outbox entry $entity (${entry.capability}) failed, attempt ${entry.attempts}", error)
+            }
+            settle(until) { if (outcome.isSuccess) complete(entity, me) else fail(entity, me, entry, outcome.exceptionOrNull()!!) }
         }
         return claimed.size
+    }
+
+    /**
+     * Records a handler's outcome, retrying conflicts for as long as the claim lasts: the handler has
+     * already run, and if its completion were given up (after the transaction's own retries) the entry
+     * would run again once the lease lapsed, and a failure would not count towards dying.
+     */
+    private fun settle(until: Long, record: () -> Unit) {
+        var pause = 5L
+        while (true) {
+            try {
+                return record()
+            } catch (e: Exception) {
+                if (!SqlStates.isRetryable(e) || System.nanoTime() + pause * 1_000_000 >= until) throw e
+                Thread.sleep(pause + (Math.random() * pause).toLong())
+                pause = minOf(pause * 2, 500)
+            }
+        }
     }
 
     private fun claim(e: Endpoint, me: String): List<Pair<EntityId, OutboxEntry>> = ecs.tx("pgecs:outbox-claim") {
@@ -366,10 +391,8 @@ class Outbox internal constructor(private val ecs: Ecs, val config: OutboxConfig
     }
 
     private fun fail(entity: EntityId, me: String, entry: OutboxEntry, error: Throwable) {
-        failed.incrementAndGet()
         // the claim already counted this attempt
         val attempts = entry.attempts
-        LOG.log(System.Logger.Level.INFO, "outbox entry $entity (${entry.capability}) failed, attempt $attempts", error)
         val backoff = minOf(config.maxBackoff.toMillis(), config.baseBackoff.toMillis() shl minOf(attempts - 1, 30))
         val giveUp = attempts >= config.maxAttempts
         ecs.tx("pgecs:outbox-fail") {

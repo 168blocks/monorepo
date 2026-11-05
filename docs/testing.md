@@ -28,6 +28,44 @@ The build runs 1500 queries with a fixed seed (about a minute). For a longer run
 
 The seed is printed at the end (and in a failure, with `-Ppgecs.fuzz.case=<dataset>:<query>`).
 
+### Observers and the outbox against a model
+
+`ObserverModelTest` (libs/pgecs) runs random transactions (create with value, tag and parent, set,
+remove, remove-then-add, delete with descendants, rollbacks), one writer and then four concurrent
+ones, while a plain and a randomly failing observer run. It keeps a model of what committed and checks
+what the observers were given: every changed entity once per transaction, in commit order, only
+committed transactions, `added`/`removed`/`updated`/`old` as the model says, the failing observer's
+writes rolled back with it, and the final state. `OutboxModelTest` writes random entries (both
+capabilities, targeted or not, some not before a later moment, some rolled back) while every endpoint
+delivers in its own thread and handlers fail at random, and checks that each committed entry ran only
+where it may, never before `notBefore`, and either succeeded exactly once and is gone or failed
+`maxAttempts` times and is dead.
+
+```sh
+./dev ./gradlew :libs:pgecs:test --tests '*ModelTest*' -Ppgecs.model.seed=random -Ppgecs.model.steps=5000
+```
+
+### Query lambdas against themselves
+
+A query lambda is its own oracle. `:libs:pgecs:generateLambdaFuzz` (source set `src/lambdaFuzzGen`)
+writes random predicates over a record (`FuzzRec`) as Kotlin source into the test source set: nested
+`&&`/`||`/`!`, `if` and `when` (on ints, strings, enums), Int/Long arithmetic, string functions and
+templates, `?:`, null checks and smart casts, `in` on literals and captured collections, list fields,
+regular expressions and instants. `LambdaDifferentialTest` runs each one directly on the records and,
+decompiled and lowered, as a query on the same records in PostgreSQL, and fails on any record where
+they disagree, or a predicate that does not translate.
+
+```sh
+./dev ./gradlew :libs:pgecs:test --tests '*LambdaDifferentialTest*' \
+  -Ppgecs.lambda.seed=1 -Ppgecs.lambda.count=5000 -Ppgecs.lambda.report=/tmp/lambda-report.txt
+```
+
+Known differences the generator leaves out on purpose: Int and Long arithmetic wraps around in Kotlin,
+while SQL's bigint is wider and raises an error on overflow; Kotlin orders strings by UTF-16 code units,
+PostgreSQL's `"C"` collation by code point, which differs for U+E000..U+FFFF against non-BMP
+characters; and regular expressions are PostgreSQL's (`\s` includes NBSP there). Predicates with more
+than 1024 paths (the decompiler's limit) are counted, not checked.
+
 ## End-to-end tests of the network
 
 Goal: tests that read like what a player and an operator would check, against the real network
