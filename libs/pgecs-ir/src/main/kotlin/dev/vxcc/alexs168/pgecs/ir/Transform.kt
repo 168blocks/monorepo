@@ -105,12 +105,17 @@ fun Expr.mapParams(mapping: (Int) -> Int): Expr = transform { e ->
  * in [Canonical] order, and returns the resulting shape with all values: [arguments] for the
  * existing parameters followed by the literals' values. The result is what the plan cache is keyed
  * by.
+ *
+ * A group-by or sort key that is the same expression as a projection (or, for a sort key, a group-by
+ * key) stays the same expression: it reuses that projection's parameters instead of getting its own,
+ * so that `select x + 1 ... order by x + 1` still orders by the selected column (which `distinct`
+ * and `group by` require in SQL).
  */
 fun QueryIr.parameterize(arguments: List<Any?> = emptyList()): BoundQuery {
     require(arguments.size == params.size) { "query has ${params.size} parameters, got ${arguments.size} arguments" }
     val newParams = params.toMutableList()
     val values = arguments.toMutableList()
-    val lifted = transform { e ->
+    val lift: (Expr) -> Expr = { e ->
         if (e is Expr.Literal) {
             newParams += e.type
             values += e.value
@@ -119,6 +124,16 @@ fun QueryIr.parameterize(arguments: List<Any?> = emptyList()): BoundQuery {
             e
         }
     }
+    val same = HashMap<Expr, Expr>()
+    fun shared(e: Expr): Expr = same.getOrPut(e) { e.transform(lift) }
+    val lifted = copy(
+        terms = terms.map { it.transform(lift) },
+        select = select.map { it.copy(expr = shared(it.expr)) },
+        groupBy = groupBy.map { shared(it) },
+        orderBy = orderBy.map { it.copy(expr = shared(it.expr)) },
+        limit = limit?.transform(lift),
+        offset = offset?.transform(lift),
+    )
     return BoundQuery(lifted.copy(params = newParams.toList()), values)
 }
 

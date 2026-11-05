@@ -114,7 +114,7 @@ class EngineTest {
         assertEquals(emptyList(), run(Fixtures.accountsByEmail(Expr.Literal.of("bob@example.org"))))
         assertEquals(emptyList(), run(Fixtures.accountsByEmail(Expr.Literal.of("carol@example.org"))))
         val sql = engine.compile(Fixtures.accountsByEmail().parameterize().shape).sql!!.sql
-        assertContains(sql, "lower(c2.value->>'address') = lower(")
+        assertContains(sql, "lower((c2.value->>'address') collate pg_unicode_fast) = lower(")
         assertContains(sql, "rel = 'b8:iam:email:v1'")
         assertContains(sql, "not exists")
     }

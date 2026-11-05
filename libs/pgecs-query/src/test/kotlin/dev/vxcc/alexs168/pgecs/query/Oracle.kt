@@ -41,7 +41,17 @@ class Oracle(private val rows: List<Row>, private val typeEntities: Map<String, 
         override fun hashCode() = values.hashCode()
     }
 
+    /** A query matched more than [maxBindings] combinations at some point: too slow to evaluate naively. */
+    class TooLarge(val bindings: Int) : RuntimeException("more than $bindings intermediate matches")
+
+    /** Limit on intermediate matches, so random cross products do not exhaust the heap. */
+    var maxBindings: Int = 20_000
+
+    /** `now()`: one value per execution, as in the engine. */
+    private var now: Instant = Instant.EPOCH
+
     fun run(q: QueryIr, args: List<Any?>): List<List<Any?>> {
+        now = Instant.ofEpochMilli(System.currentTimeMillis())
         val matches = solve(q.terms, Binding(emptyMap()), args)
         val aggregate = q.isAggregate
         var out: List<Pair<List<Any?>, List<Any?>>> = if (aggregate) {
@@ -80,7 +90,10 @@ class Oracle(private val rows: List<Row>, private val typeEntities: Map<String, 
     /** All matches of a conjunction: mandatory matches, then optional groups, then filters. */
     private fun solve(terms: List<Term>, start: Binding, args: List<Any?>): List<Binding> {
         var cur = listOf(start)
-        for (m in terms.filterIsInstance<Term.Match>()) cur = cur.flatMap { match(m, it, args) }
+        for (m in terms.filterIsInstance<Term.Match>()) {
+            cur = cur.flatMap { match(m, it, args) }
+            if (cur.size > maxBindings) throw TooLarge(cur.size)
+        }
         for (o in terms.filterIsInstance<Term.Optional>()) {
             cur = cur.flatMap { b ->
                 val r = solve(o.terms, b, args)
@@ -150,7 +163,37 @@ class Oracle(private val rows: List<Row>, private val typeEntities: Map<String, 
         x is Boolean && y is Boolean -> x.compareTo(y)
         x is UUID && y is UUID -> x.toString().compareTo(y.toString())
         x is Instant && y is Instant -> x.compareTo(y)
+        x is Duration && y is Duration -> x.compareTo(y)
         else -> error("cannot compare $x and $y")
+    }
+
+    /** Kotlin arithmetic on non-null operands, as `Types.arith` types it. */
+    private fun arith(op: ArithOp, l: Any, r: Any): Any = when {
+        l is Long && r is Long -> when (op) {
+            ArithOp.PLUS -> l + r
+            ArithOp.MINUS -> l - r
+            ArithOp.TIMES -> l * r
+            ArithOp.DIV -> l / r
+            ArithOp.REM -> l % r
+        }
+        l is Number && r is Number -> {
+            val x = l.toDouble()
+            val y = r.toDouble()
+            when (op) {
+                ArithOp.PLUS -> x + y
+                ArithOp.MINUS -> x - y
+                ArithOp.TIMES -> x * y
+                ArithOp.DIV -> x / y
+                ArithOp.REM -> x % y
+            }
+        }
+        l is Instant && r is Duration -> if (op == ArithOp.PLUS) l + r else l - r
+        l is Duration && r is Instant -> r + l
+        l is Instant && r is Instant -> Duration.between(r, l)
+        l is Duration && r is Duration -> if (op == ArithOp.PLUS) l + r else l - r
+        l is Duration && r is Long -> if (op == ArithOp.TIMES) l.multipliedBy(r) else Duration.ofMillis(l.toMillis() / r)
+        l is Long && r is Duration -> r.multipliedBy(l)
+        else -> error("cannot compute $l ${op.symbol} $r")
     }
 
     private fun eq(x: Any?, y: Any?): Boolean = when {
@@ -195,21 +238,17 @@ class Oracle(private val rows: List<Row>, private val typeEntities: Map<String, 
         is Expr.IsNull -> eval(e.operand, b, args, group) == null
         is Expr.Coalesce -> e.operands.firstNotNullOfOrNull { eval(it, b, args, group) }
         is Expr.Arith -> {
-            val l = eval(e.left, b, args, group) as Long?
-            val r = eval(e.right, b, args, group) as Long?
-            if (l == null || r == null) {
-                null
-            } else {
-                when (e.op) {
-                    ArithOp.PLUS -> l + r
-                    ArithOp.MINUS -> l - r
-                    ArithOp.TIMES -> l * r
-                    ArithOp.DIV -> l / r
-                    ArithOp.REM -> l % r
-                }
-            }
+            val l = eval(e.left, b, args, group)
+            val r = eval(e.right, b, args, group)
+            if (l == null || r == null) null else arith(e.op, l, r)
         }
-        is Expr.Negate -> (eval(e.operand, b, args, group) as Long?)?.let { -it }
+        is Expr.Negate -> when (val v = eval(e.operand, b, args, group)) {
+            null -> null
+            is Long -> -v
+            is Double -> -v
+            is Duration -> v.negated()
+            else -> error("cannot negate $v")
+        }
         is Expr.Call -> {
             val a = e.args.map { eval(it, b, args, group) }
             if (a.any { it == null }) {
@@ -223,7 +262,7 @@ class Oracle(private val rows: List<Row>, private val typeEntities: Map<String, 
                     Functions.STARTS_WITH -> (a[0] as String).startsWith(a[1] as String)
                     Functions.ENDS_WITH -> (a[0] as String).endsWith(a[1] as String)
                     Functions.CONTAINS -> (a[0] as String).contains(a[1] as String)
-                    Functions.NOW -> Instant.now()
+                    Functions.NOW -> now
                     Functions.CONCAT -> (a[0] as String) + (a[1] as String)
                     else -> error("unknown function ${e.fn}")
                 }
