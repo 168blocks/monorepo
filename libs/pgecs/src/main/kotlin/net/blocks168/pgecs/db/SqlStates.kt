@@ -31,6 +31,8 @@ object SqlStates {
     const val DELETE_PANIC = "EC008"
     /** A catalog write outside freeze. */
     const val CATALOG_WRITE = "EC009"
+    /** A misrouted or malformed outbox entry: unknown capability, or a target endpoint without it. */
+    const val OUTBOX_ROUTING = "EC010"
 
     private val RETRYABLE = setOf(SERIALIZATION_FAILURE, DEADLOCK_DETECTED)
 

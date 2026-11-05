@@ -321,6 +321,16 @@ update ecs_component o
 - An entry targeted at an endpoint that is down waits until it returns. An optional deadline turns it dead instead.
 - If a player moved between enqueue and execution, the handler re-reads presence and re-enqueues to the new endpoint in the same `tx` that completes the old entry.
 
+### Implementation (outbox)
+
+`net.blocks168.pgecs.outbox`, reached as `ecs.outbox`:
+
+- `ecs.outbox.process(id, name, kind)` takes `pg_try_advisory_lock(Outbox.lockKey(id))` (most significant bits xor least) on a dedicated connection and `LISTEN`s on `pgecs_outbox` there. It refuses to start (`ProcessAlreadyRunningException`) when another JVM holds the lock. `isAlive(id)` reads `pg_locks`.
+- `process.endpoint(id, name) { handles(Cap) { payload -> ... } }` makes the endpoint a child of the process and rewrites its `(pgecs:can, <capability>)` pairs from the handlers. Entries targeted at it whose capability it lost are dead-lettered in the same transaction.
+- `outbox(Cap, payload, to = endpoint, idempotencyKey, notBefore, deadline)` inside `tx { }` writes the entry. Base schema V3 checks it at commit (deferred constraint trigger, so the order of the entry's rows does not matter): the capability exists, the payload matches its schema, and a target endpoint can handle it (`EC010`). It also notifies `pgecs_outbox` with the capability name.
+- `start()` runs one delivery loop per endpoint, woken by notifications or every `poll`. A claim is one statement with `for update of c skip locked` that counts the attempt and sets `claimedBy` / `leaseUntil`. Handlers run outside any transaction. Success deletes the entry if the claim is still ours; failure clears the claim and backs off. After `maxAttempts`, or past its `deadline` (system `pgecs:outbox-deadlines`), the entry gets `pgecs:outbox-dead`.
+- Player presence (`b8:mc:online-on`) and `to = onlineOn(player)` belong to the Minecraft side (`pgecs-fabric`) and are not implemented yet.
+
 ## Query language and SQL compiler
 
 Queries are built with a Kotlin DSL or a Java-compatible DSL. Predicates, projections and index expressions are lambdas decompiled from bytecode at runtime. Both DSLs produce the same IR, which adds value predicates, projection, ordering, aggregation and paging to flecs-style terms. The Postgres backend turns it into a single SQL statement.

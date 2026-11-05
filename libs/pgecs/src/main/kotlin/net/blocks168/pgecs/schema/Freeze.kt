@@ -27,7 +27,12 @@ object CoreComponents {
     /** Leases, schedules and observer cursors of systems (net.blocks168.pgecs.system). */
     val SYSTEM: ComponentSpec by lazy { net.blocks168.pgecs.system.SystemComponent.toSpec() }
 
-    val ALL: List<ComponentSpec> by lazy { listOf(CHILD_OF, SYSTEM) }
+    /** Processes, endpoints, capabilities and the outbox (net.blocks168.pgecs.outbox). */
+    val OUTBOX: List<ComponentSpec> by lazy {
+        net.blocks168.pgecs.outbox.Outbox.TYPES.map { it.toSpec() }
+    }
+
+    val ALL: List<ComponentSpec> by lazy { listOf(CHILD_OF, SYSTEM) + OUTBOX }
 }
 
 /** Freeze stopped; [problems] says why, one line each. Nothing that was applied is unsafe to keep. */

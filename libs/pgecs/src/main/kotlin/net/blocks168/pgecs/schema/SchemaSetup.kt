@@ -20,7 +20,7 @@ object SchemaSetup {
     const val SCHEMA_LOCK_KEY: Long = 0x7067_6563_735f_7363L // "pgecs_sc"
 
     /** Base schema scripts, in order: version `i + 1` is `MIGRATIONS[i]`. */
-    private val MIGRATIONS = listOf("V1__base.sql", "V2__systems.sql")
+    private val MIGRATIONS = listOf("V1__base.sql", "V2__systems.sql", "V3__outbox.sql")
 
     /** The base schema version this pgecs build creates. */
     val LATEST: Int get() = MIGRATIONS.size

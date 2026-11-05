@@ -21,6 +21,12 @@ class ExpiryTest {
             Pgecs.on(db) { engine = QueryEngineConfig(eqsatInstances = 0) }.use { ecs ->
                 ecs.freeze()
                 Expiry.install(ecs)
+                // the sweeps may have run against this database before (a shared PGECS_TEST_URL): make them due
+                db.tx {
+                    connection.createStatement().use {
+                        it.executeUpdate("update ecs_component set value = value || '{\"nextRun\": 0}' where rel = 'pgecs:system:v1' and value->>'name' like 'b8:util:expire-%'")
+                    }
+                }
                 val (old, fresh, child) = ecs.tx {
                     val old = create { +Otp; this[ExpiresSlowComponent] = Instant.now().minusSeconds(1) }
                     val fresh = create { +Otp; this[ExpiresFastComponent] = Instant.now().plusSeconds(600) }
