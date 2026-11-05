@@ -180,10 +180,14 @@ fun `second player sees the first in the lobby`() = scenario {
   bot's log and state, snapshots of the agents it used, and `podman logs --tail 300` of every container
   of the checkout's compose project (`BLOCKS_COMPOSE_PROJECT`). With `@NetworkScenario` the bundle is
   also attached to the test in the JUnit / Gradle report.
-* Other kinds of players plug in as a `ScenarioDriver` (closed at the end, asked for diagnostics on
-  failure) via `register(...)`. The real game client is meant to come in like that:
-  `fun ScenarioScope.client(role: String) = register(GameClientDriver(...))`, attaching its
-  screenshots and log tail.
+* `client(role)` starts a real game client (`ScenarioClient` on `GameClients`) with a fresh name:
+  `join(edge(n), dimension)`, `awaitSees(player)`, `awaitChat`, `chat`, `look`, `hud`, `screenshot`.
+  It skips the scenario where clients cannot run, and on failure attaches a last screenshot, its
+  screenshots and its log tail. `PlayerScenarioTest` has the README example with it.
+* Other kinds of players plug in the same way: a `ScenarioDriver` (closed at the end, asked for
+  diagnostics on failure) registered with `register(...)`.
+* `switchTo(server)` is done only when the proxy agent reports the bot on that server: a new login
+  alone can be Velocity's failover back to the lobby while the target still starts (#43).
 
 ### Next steps
 

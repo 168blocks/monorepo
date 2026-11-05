@@ -4,7 +4,9 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import net.blocks168.e2e.bot.GameMode
 import kotlin.test.assertEquals
+import kotlin.math.abs
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * Players on the network, written as scenarios: protocol-level bots connect through the edges, the
@@ -29,6 +31,24 @@ class PlayerScenarioTest {
         bob.awaitWorld("minecraft:overworld")
         bob.awaitSees(alice, target)
         lobby.assertOnline(bob)
+    }
+
+    /** The README example with a real, rendering game client as the second player. */
+    @NetworkScenario
+    fun `a real game client sees a bot in the lobby`() = scenario(timeout = 10.minutes) {
+        val alice = bot("alice").connect(edge(1)).awaitWorld("minecraft:overworld")
+        val lobby = server("lobby")
+        lobby.assertOnline(alice)
+        val target = alice.position.copy(y = alice.position.y + 0.15)
+        alice.moveTo(target, onGround = false)
+        lobby.assertPosition(alice, target, tolerance = 0.01)
+
+        val bob = client("bob").join(edge(2), "minecraft:overworld")
+        lobby.assertOnline(bob.name)
+        val seen = bob.awaitSees(alice)
+        assertTrue(abs(seen.x - target.x) < 0.5 && abs(seen.y - target.y) < 0.5 && abs(seen.z - target.z) < 0.5, "bob sees alice at $seen, she is at $target")
+        bob.hud(visible = false)
+        bob.screenshot("lobby-alice-visible").assertNotBlank()
     }
 
     @NetworkScenario

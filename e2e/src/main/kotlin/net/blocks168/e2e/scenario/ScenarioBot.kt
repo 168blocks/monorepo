@@ -84,19 +84,31 @@ class ScenarioBot internal constructor(private val scenario: ScenarioScope, over
     suspend fun awaitSees(other: ScenarioBot, at: Vec3 = other.position, tolerance: Double = 0.01, timeout: Duration = 10.seconds): Vec3 =
         blocking { bot.awaitPlayerAt(other.uuid, at, tolerance, timeout) }
 
-    /** `/server <server>` through Velocity, retried while [server] is still starting. */
+    /**
+     * `/server <server>` through Velocity, retried while [server] is still starting. Done only when
+     * the proxy agent reports the bot on [server]: a new login alone can also be Velocity's failover
+     * back to the lobby when [server] turned the bot away (#43).
+     */
     suspend fun switchTo(server: String, retryFor: Duration = 3.minutes) = apply {
-        val target = bot.joins + 1
+        val proxy = scenario.proxy()
         val start = TimeSource.Monotonic.markNow()
         while (true) {
+            val target = bot.joins + 1
             command("server $server")
-            try {
+            val joined = try {
                 awaitJoins(target, 20.seconds)
-                return@apply
+                true
             } catch (e: BotException) {
-                if (!bot.connected || start.elapsedNow() > retryFor) throw e
-                scenario.log("$name: switch to $server not done yet: ${bot.messages().lastOrNull()?.text}")
+                if (!bot.connected) throw e
+                false
             }
+            if (joined && runCatching { proxy.assertOn(name, server, 5.seconds) }.isSuccess) {
+                scenario.log("$name: on $server")
+                return@apply
+            }
+            if (start.elapsedNow() > retryFor) throw AssertionError("$name did not get onto $server within $retryFor; proxy says ${proxy.player(name)}, last message: ${bot.messages().lastOrNull()?.text}")
+            scenario.log("$name: switch to $server not done yet (proxy: ${proxy.player(name)?.server}, last message: ${bot.messages().lastOrNull()?.text})")
+            delay(3.seconds)
         }
     }
 
