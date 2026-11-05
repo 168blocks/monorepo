@@ -334,3 +334,16 @@ create trigger ecs_component_90_after_update after update on ecs_component
   referencing old table as old_rows new table as new_rows for each statement execute function ecs_component_after_update();
 create trigger ecs_component_90_after_delete after delete on ecs_component
   referencing old table as old_rows for each statement execute function ecs_component_after_delete();
+
+-- ---------------------------------------------------------------------------------------- planner
+
+-- Hot query shapes per process kind, so the next boot can pre-compile them. Written by the planner's
+-- periodic flush; not part of the ECS data, so no triggers and no change log.
+create table ecs_query_shape (
+  process     text not null,
+  fingerprint text not null,
+  canonical   text not null,
+  uses        bigint not null,
+  last_used   timestamptz not null default now(),
+  primary key (process, fingerprint)
+);
