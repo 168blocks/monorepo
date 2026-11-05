@@ -22,6 +22,7 @@ include(":frontend") // Compose Multiplatform (web + desktop)
 
 // Minecraft
 include(":mods:example-common") // Fabric mod (Kotlin + Java mixins), server and client
+include(":mods:e2e-client") // dev-only client mod: local RPC for end-to-end tests with real game clients
 include(":velocity:example-plugin") // Velocity plugin
 include(":mods:e2e-agent") // dev only: server state over HTTP for the e2e tests
 include(":velocity:e2e-agent") // dev only: proxy state over HTTP for the e2e tests
