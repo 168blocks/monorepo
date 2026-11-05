@@ -19,6 +19,7 @@
   proot,
   bashInteractive,
   egglogWasm,
+  egglogRedline,
 }:
 let
   gradle = gradle_9.override { java = jdk; };
@@ -102,6 +103,7 @@ let
         BLOCKS_BASH = "${bashInteractive}/bin/bash";
         # libs/pgecs-eqsat compiles egglog (nix/egglog-wasm.nix) to JVM classes
         BLOCKS_EGGLOG_WASM = "${egglogWasm}/egglog.wasm";
+        BLOCKS_EGGLOG_REDLINE = "${egglogRedline}";
       };
 
       gradleFlags = [
