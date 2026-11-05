@@ -254,7 +254,9 @@ object LambdaDecompiler {
     ): LExpr {
         val code = method.code().orElseThrow { UntranslatableLambdaException("$location has no code") }
         val where = sourceLocation(model, location)
-        val exec = SymbolicExecutor(where, code, returnType, staticReader(loader), thisField)
+        val exec = SymbolicExecutor(where, code, returnType, staticReader(loader), thisField, enumConstants = { owner ->
+            runCatching { Class.forName(owner.replace('/', '.'), false, loader) }.getOrNull()?.enumConstants?.toList()
+        })
         return exec.run(slots, thisSlot)
     }
 
