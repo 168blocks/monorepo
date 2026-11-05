@@ -1,0 +1,44 @@
+# WireGuard hub and spoke: the core host is the hub, every edge and ops machine a peer.
+# Design: https://claude.ai/artifact/WDswfCSv1YSxbGT7HWgtzd ("WireGuard")
+#
+# `gradlew :deploy:wireguard` (part of :deploy:stage) renders build/wireguard/<name>/wg0.conf for the hub
+# and every peer from this file. A peer without `public-key` gets a key pair generated once per checkout
+# (the local network, deploy/compose.yaml); a real machine runs `wg genkey` itself, keeps the private key
+# root-only, and only its public key goes here. Nothing secret is committed.
+#
+# Roles and their tunnel subnets (PostgreSQL decides the database role by these, nix/postgres-entrypoint.sh):
+#   edge  10.168.1.0/24  edge Velocity proxies  -> role blocks_edge
+#   ops   10.168.2.0/24  admins, CI             -> role blocks_ops
+#
+# Rotation: add the new key as a second peer, switch the machine over, delete the old peer.
+# Revocation: delete the peer (the hub then drops its traffic: no Postgres, backend or Fabric servers).
+#
+# Only a small subset of TOML is read: [hub], [[peer]] tables with `key = "string"` or `key = number`.
+
+[hub]
+address = "10.168.0.1"
+# what peers dial (UDP); the local network's core container
+endpoint = "core"
+listen-port = 51820
+mtu = 1420
+
+[[peer]]
+name = "edge-1"
+role = "edge"
+address = "10.168.1.1"
+
+[[peer]]
+name = "edge-2"
+role = "edge"
+address = "10.168.1.2"
+
+[[peer]]
+name = "edge-3"
+role = "edge"
+address = "10.168.1.3"
+
+# [[peer]]
+# name = "ops-alex"
+# role = "ops"
+# address = "10.168.2.1"
+# public-key = "<output of `wg pubkey` on that machine>"

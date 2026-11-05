@@ -39,6 +39,12 @@ scenario("second player sees the first in the lobby") {
   plugin.
 * `NetworkTest` also checks the backend through HTTP (health with database, counter persisted in
   PostgreSQL, web frontend served).
+* `TunnelTest`: the WireGuard layout from inside, through `ComposeNetwork` (podman, local network
+  only): the core namespace reaches PostgreSQL over localhost as `blocks`; a container on `wan` without a
+  tunnel reaches neither PostgreSQL nor the Fabric servers; an edge is `blocks_edge` by its tunnel
+  address (as `blocks` it is rejected) and reaches the Fabric servers only through the tunnel; with its
+  peer removed from the hub an edge refuses logins (a bot), and lets players in again once restored.
+  Nothing reaches PostgreSQL through a host port.
 * Server-side agents (see "Server-side assertions" below): `ServerAgent` / `ProxyAgent` in
   `e2e/.../agent/`; `AgentTest` checks that Velocity reports its servers and that both Fabric servers
   report their worlds and run commands (`list`). The Fabric server tests are skipped unless
@@ -137,7 +143,8 @@ Errors are `{"error": "..."}` with 400 (bad request), 404 (unknown player/server
 `ServerAgent` adds `assertOnline`, `assertOffline`, `assertPosition`; `ProxyAgent` adds `assertOn`
 (polling with a timeout).
 
-The database is checked directly through pgecs, the same way the services use it.
+The database is checked from a container in the core namespace (`ComposeNetwork`, `psql`); PostgreSQL
+has no host port.
 
 ### Design: scenario runner
 
