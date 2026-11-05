@@ -41,6 +41,12 @@ class Oracle(private val rows: List<Row>, private val typeEntities: Map<String, 
         override fun hashCode() = values.hashCode()
     }
 
+    /** A query matched more than [maxBindings] combinations at some point: too slow to evaluate naively. */
+    class TooLarge(val bindings: Int) : RuntimeException("more than $bindings intermediate matches")
+
+    /** Limit on intermediate matches, so random cross products do not exhaust the heap. */
+    var maxBindings: Int = 20_000
+
     /** `now()`: one value per execution, as in the engine. */
     private var now: Instant = Instant.EPOCH
 
@@ -84,7 +90,10 @@ class Oracle(private val rows: List<Row>, private val typeEntities: Map<String, 
     /** All matches of a conjunction: mandatory matches, then optional groups, then filters. */
     private fun solve(terms: List<Term>, start: Binding, args: List<Any?>): List<Binding> {
         var cur = listOf(start)
-        for (m in terms.filterIsInstance<Term.Match>()) cur = cur.flatMap { match(m, it, args) }
+        for (m in terms.filterIsInstance<Term.Match>()) {
+            cur = cur.flatMap { match(m, it, args) }
+            if (cur.size > maxBindings) throw TooLarge(cur.size)
+        }
         for (o in terms.filterIsInstance<Term.Optional>()) {
             cur = cur.flatMap { b ->
                 val r = solve(o.terms, b, args)

@@ -75,6 +75,7 @@ class RandomQueryTest {
     private class Stats {
         var generated = 0
         var invalid = 0
+        var tooLarge = 0
         var checked = 0
         var partitioned = 0
         var aggregate = 0
@@ -107,6 +108,13 @@ class RandomQueryTest {
                         stats.invalid++
                         continue
                     }
+                    // naive evaluation of a large cross product takes too long (and the engine returns as many rows)
+                    try {
+                        data.oracle.run(case.query, case.args)
+                    } catch (_: Oracle.TooLarge) {
+                        stats.tooLarge++
+                        continue
+                    }
                     valid++
                     stats.checked++
                     if (case.query.isAggregate) stats.aggregate++
@@ -120,7 +128,7 @@ class RandomQueryTest {
             }
         }
         println(
-            "seed $seed: checked ${stats.checked} random queries (${stats.generated} generated, ${stats.invalid} invalid), " +
+            "seed $seed: checked ${stats.checked} random queries (${stats.generated} generated, ${stats.invalid} invalid, ${stats.tooLarge} too large), " +
                 "${stats.aggregate} aggregate, ${stats.ordered} ordered, ${stats.paged} paged, ${stats.optional} with optional groups, " +
                 "${stats.partitioned} partitioned; ${stats.rows} result rows; eqsat engine: ${withEqsat.metrics()}",
         )
@@ -167,6 +175,8 @@ class RandomQueryTest {
         if (parsed.getOrNull() != q) return "canonical text does not parse back: ${parsed.exceptionOrNull() ?: parsed.getOrNull()?.canonicalText}"
         val expected = try {
             data.oracle.run(q, args)
+        } catch (e: Oracle.TooLarge) {
+            return null // a partition or a shrinking step grew the cross product: nothing to compare
         } catch (e: Exception) {
             return "the oracle failed: $e"
         }
