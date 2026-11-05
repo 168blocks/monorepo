@@ -351,6 +351,10 @@ internal class Lowering(private val q: QueryBuilder) {
         is LV.Obj -> objExpr(lv, ctx)
     }
 
+    /** How kotlinx.serialization stores [e]: its `@SerialName`, else its name. */
+    private fun serialName(e: Enum<*>): String =
+        e.declaringJavaClass.getField(e.name).getAnnotation(kotlinx.serialization.SerialName::class.java)?.value ?: e.name
+
     /** A JVM value as a parameter (captured) or literal (constant). */
     private fun objExpr(o: LV.Obj, ctx: Ctx): Expr {
         val v = o.value
@@ -360,7 +364,7 @@ internal class Lowering(private val q: QueryBuilder) {
         }
         val (type, value) = when (v) {
             is EntityId -> ValueType.UUID to v.id
-            is Enum<*> -> ValueType.TEXT to v.name
+            is Enum<*> -> ValueType.TEXT to serialName(v)
             is Char -> ValueType.TEXT to v.toString()
             is String -> ValueType.TEXT to v
             is Boolean -> ValueType.BOOL to v

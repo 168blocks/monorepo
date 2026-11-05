@@ -37,6 +37,14 @@ object MailComponent : Component<Mail>("test:ecs:mail:v1") {
 }
 
 object ScoreComponent : Component<Score>("test:ecs:score:v1")
+
+@Serializable
+enum class Rank { @kotlinx.serialization.SerialName("gold") GOLD, SILVER }
+
+@Serializable
+data class Badge(val rank: Rank, val owner: String)
+
+object BadgeComponent : Component<Badge>("test:ecs:badge:v1")
 object Member : Tag("test:ecs:member")
 object Muted : Tag("test:ecs:muted")
 object Likes : Relation("test:ecs:likes")
@@ -49,7 +57,7 @@ class EcsTest {
     private val ecs = Pgecs.on(database) {
         loadModules = false
         engine = QueryEngineConfig(eqsatInstances = 0)
-        register(MailComponent, ScoreComponent, Member, Muted, Likes, Leads)
+        register(MailComponent, ScoreComponent, BadgeComponent, Member, Muted, Likes, Leads)
     }.also { it.freeze() }
 
     @AfterAll
@@ -237,6 +245,28 @@ class EcsTest {
                 }.fetchOne()
             }
         }
+    }
+
+    @Test
+    fun `enum values in queries compare by their serial names`() {
+        val owner = "b${UUID.randomUUID()}"
+        val (gold, silver) = ecs.tx {
+            create { this[BadgeComponent] = Badge(Rank.GOLD, owner) } to create { this[BadgeComponent] = Badge(Rank.SILVER, owner) }
+        }
+        for ((rank, expected) in listOf(Rank.GOLD to gold, Rank.SILVER to silver)) {
+            val captured = ecs.query {
+                val e by entity
+                e has BadgeComponent.where { it.owner == owner && it.rank == rank }
+                select { e }
+            }.fetch()
+            assertEquals(listOf(expected), captured, "captured $rank")
+        }
+        val literal = ecs.query {
+            val e by entity
+            e has BadgeComponent.where { it.owner == owner && it.rank == Rank.GOLD }
+            select { e }
+        }.fetch()
+        assertEquals(listOf(gold), literal)
     }
 
     @Test
