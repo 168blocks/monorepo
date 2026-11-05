@@ -12,6 +12,7 @@ rootProject.name = "168blocks"
 
 // Shared libraries
 include(":libs:pgecs") // ACID persistent ECS on PostgreSQL (backend, mods, Velocity plugins)
+include(":libs:pgecs-eqsat") // equality saturation (egglog on Endive) for the pgecs query planner
 include(":libs:common") // JVM code shared by all server-side components (CBOR wire format, ...)
 include(":libs:api") // Kotlin Multiplatform backend API model, shared with the frontend
 

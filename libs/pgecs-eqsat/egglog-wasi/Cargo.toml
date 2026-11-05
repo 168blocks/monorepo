@@ -1,0 +1,18 @@
+[package]
+name = "egglog-wasi"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Unmodified egglog. The Nix build (nix/egglog-wasm.nix) puts the pinned source next to this crate.
+egglog = { path = "../egglog", default-features = false }
+
+[profile.release]
+opt-level = "s"   # smaller functions JIT far better on the JVM than opt-level 3 (36 vs 46 ms per query)
+lto = true
+codegen-units = 1
+panic = "abort"
