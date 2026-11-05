@@ -1,10 +1,21 @@
 {
   description = "168blocks: Minecraft SMP monorepo (Fabric mods, Velocity plugins, Ktor backend, Compose frontend)";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    # Rust toolchains with the wasm32-wasip1 target (egglog for the pgecs optimizer, nix/egglog-wasm.nix)
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
 
   outputs =
-    { self, nixpkgs }:
+    {
+      self,
+      nixpkgs,
+      rust-overlay,
+    }:
     let
       systems = [
         "x86_64-linux"
@@ -24,6 +35,9 @@
           pg_jsonschema = pg.pkgs.callPackage ./nix/pg_jsonschema.nix { };
         in
         pg.withPackages (_: [ pg_jsonschema ]);
+
+      # egglog as wasm32-wasip1 for libs/pgecs-optimizer (Endive compiles it to JVM classes)
+      egglogWasmFor = pkgs: (pkgs.extend rust-overlay.overlays.default).callPackage ./nix/egglog-wasm.nix { };
     in
     {
       devShells = forAllSystems (
@@ -63,6 +77,7 @@
               export BLOCKS_NODE=${pkgs.nodejs_24}/bin/node
               export BLOCKS_BINARYEN=${pkgs.binaryen}
               export BLOCKS_BASH=${pkgs.bashInteractive}/bin/bash
+              export BLOCKS_EGGLOG_WASM=${egglogWasmFor pkgs}/egglog.wasm
               # per-checkout slot, ports and compose project (several worktrees side by side)
               if root=$(git rev-parse --show-toplevel 2>/dev/null) && [ -f "$root/tools/instance.sh" ]; then
                 BLOCKS_ROOT=$root . "$root/tools/instance.sh"
@@ -79,6 +94,8 @@
         in
         {
           postgresql = postgresFor pkgs;
+
+          egglog-wasm = egglogWasmFor pkgs;
 
           # PostgreSQL with pg_jsonschema for deploy/compose.yaml (the official image lacks the extension)
           postgres-image = pkgs.dockerTools.buildLayeredImage {
