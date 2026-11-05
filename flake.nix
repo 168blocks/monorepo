@@ -63,6 +63,10 @@
               export BLOCKS_NODE=${pkgs.nodejs_24}/bin/node
               export BLOCKS_BINARYEN=${pkgs.binaryen}
               export BLOCKS_BASH=${pkgs.bashInteractive}/bin/bash
+              # per-checkout slot, ports and compose project (several worktrees side by side)
+              if root=$(git rev-parse --show-toplevel 2>/dev/null) && [ -f "$root/tools/instance.sh" ]; then
+                BLOCKS_ROOT=$root . "$root/tools/instance.sh"
+              fi
             '';
           };
         }
@@ -79,7 +83,8 @@
           # PostgreSQL with pg_jsonschema for deploy/compose.yaml (the official image lacks the extension)
           postgres-image = pkgs.dockerTools.buildLayeredImage {
             name = "localhost/168blocks/postgres";
-            tag = "latest";
+            # tag = content hash chosen by Nix (tools/network.sh reads it), so worktrees never share a tag
+            tag = null;
             contents = [
               (postgresFor pkgs)
               pkgs.bashInteractive
@@ -106,7 +111,8 @@
           # files (deploy/build/stage/<service>) at /srv, so the image only changes with the JRE.
           runtime-image = pkgs.dockerTools.buildLayeredImage {
             name = "localhost/168blocks/runtime";
-            tag = "latest";
+            # tag = content hash chosen by Nix (tools/network.sh reads it), so worktrees never share a tag
+            tag = null;
             contents = [
               jre
               pkgs.bashInteractive
