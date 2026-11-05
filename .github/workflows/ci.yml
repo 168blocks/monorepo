@@ -82,6 +82,10 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
           grep "^$user:" /etc/subuid /etc/subgid
+          # WireGuard in the compose network (nix/wg-up.sh): the kernel module if the runner has it,
+          # userspace wireguard-go on /dev/net/tun otherwise
+          sudo modprobe wireguard || echo "no wireguard kernel module: wireguard-go"
+          ls -l /dev/net/tun
 
       - uses: cachix/install-nix-action@v31
         with:

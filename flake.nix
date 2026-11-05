@@ -171,17 +171,31 @@
 
           # Runtime image for every JVM service in deploy/compose.yaml. The services mount their staged
           # files (deploy/build/stage/<service>) at /srv, so the image only changes with the JRE.
+          # Also the WireGuard tooling (nix/wg-up.sh): the core container and the edges bring up their
+          # wg0 with it, with the kernel module or userspace wireguard-go.
           runtime-image = pkgs.dockerTools.buildLayeredImage {
             name = "localhost/168blocks/runtime";
             # tag = content hash chosen by Nix (tools/network.sh reads it), so worktrees never share a tag
             tag = null;
-            contents = [
-              jre
-              pkgs.bashInteractive
-              pkgs.coreutils
-              pkgs.cacert
-              pkgs.dockerTools.fakeNss
-            ];
+            # one merged /bin (several of these packages bring their own bin/ and sbin/)
+            contents = pkgs.buildEnv {
+              name = "runtime-root";
+              paths = [
+                jre
+                pkgs.bashInteractive
+                pkgs.coreutils
+                pkgs.cacert
+                pkgs.dockerTools.fakeNss
+                pkgs.iproute2
+                pkgs.wireguard-tools
+                pkgs.wireguard-go
+                (pkgs.writeShellScriptBin "wg-up" (builtins.readFile ./nix/wg-up.sh))
+              ];
+              pathsToLink = [
+                "/bin"
+                "/etc"
+              ];
+            };
             extraCommands = "mkdir -p tmp bin && chmod 1777 tmp && ln -sf ${pkgs.bashInteractive}/bin/bash bin/sh";
             config = {
               Env = [

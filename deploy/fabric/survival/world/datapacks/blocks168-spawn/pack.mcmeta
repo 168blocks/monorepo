@@ -1,0 +1,7 @@
+{
+  "pack": {
+    "description": "168blocks survival: keeps the world spawn area loaded (issue #53)",
+    "min_format": 121,
+    "max_format": 121
+  }
+}

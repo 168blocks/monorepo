@@ -108,7 +108,7 @@ Do not hard-code ports, container or project names in new scripts or tests: take
 | `frontend/` | Compose Multiplatform frontend: web (Kotlin/Wasm) and desktop |
 | `mods/<name>` | Fabric mods (Minecraft 26.3, Loom without remapping, fabric-language-kotlin). `mods/example-common`: server + client; `mods/e2e-client`: dev-only client RPC for e2e tests |
 | `velocity/<name>` | Velocity plugins (Kotlin, fat jar via `pluginJar`) |
-| `deploy/` | podman compose network (`compose.yaml`) and the Gradle task that stages it (`:deploy:stage`) |
+| `deploy/` | podman compose network (`compose.yaml`, WireGuard peers in `wireguard/peers.toml`) and the Gradle tasks that stage it (`:deploy:stage`, `:deploy:wireguard`) |
 | `e2e/` | End-to-end tests against the running network |
 | `docs/` | `architecture.md`, `testing.md`, `pgecs.md` (pgecs design) |
 

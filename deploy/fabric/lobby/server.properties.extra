@@ -1,4 +1,6 @@
 server-port=25601
+# only on the WireGuard hub address (deploy/wireguard/peers.toml): the edges reach it through the tunnel
+server-ip=10.168.0.1
 motd=168blocks lobby
 level-name=world
 gamemode=adventure
