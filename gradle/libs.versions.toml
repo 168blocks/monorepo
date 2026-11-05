@@ -20,6 +20,9 @@ ksp = "2.3.13" # pgecs-ksp (KSP2, independent of the Kotlin version)
 
 # Minecraft / Fabric
 minecraft = "26.3"
+# SHA-1 of 26.3's version JSON (piston-meta.mojang.com/v1/packages/<sha1>/<minecraft>.json, listed in
+# Mojang's version_manifest_v2.json): Loom reads this fixed file instead of the mutable manifest
+mojang-version-json-sha1 = "80608ff6753705b6a82e2cb86a5937d4d233abd4"
 fabric-loader = "0.20.1"
 fabric-api = "0.165.2+26.3"
 fabric-kotlin = "1.14.2+kotlin.2.4.21"

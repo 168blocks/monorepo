@@ -25,6 +25,9 @@ object E2eClient : ClientModInitializer {
     /** How often the client entered a world (play phase) in this session */
     val joins = java.util.concurrent.atomic.AtomicInteger()
 
+    /** Frames rendered so far (counted by `LevelRendererMixin`) */
+    val frames = java.util.concurrent.atomic.AtomicLong()
+
     override fun onInitializeClient() {
         ClientReceiveMessageEvents.GAME.register { msg, overlay -> if (!overlay) ChatLog.add(msg.string) }
         ClientReceiveMessageEvents.CHAT.register { msg, _, _, _, _ -> ChatLog.add(msg.string) }

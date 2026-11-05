@@ -14,7 +14,7 @@ import dev.vxcc.alexs168.pgecs.serial.PgecsJson
  * 1. new entities, in one statement;
  * 2. per entity, sorted by id: `removeAll` of relations, removals, then sets (an exclusive set also
  *    removes the relation's other pairs);
- * 3. deleted entities, in one statement, so cleanup policies and cascades run last.
+ * 3. deleted entities, one statement each (sorted), so cleanup policies and cascades run last.
  *
  * Sorting by entity id means two transactions touching the same entities lock them in the same
  * order, which avoids most deadlocks.
@@ -82,9 +82,14 @@ internal class WriteBuffer {
             if (created.isNotEmpty()) createEntities(c)
             for (entity in entities.keys.sortedWith(UUID_ORDER)) flushEntity(c, entity, entities.getValue(entity))
             if (deleted.isNotEmpty()) {
-                c.prepareStatement("delete from ecs_entity where id = any(?)").use { st ->
-                    st.setArray(1, c.createArrayOf("uuid", deleted.sortedWith(UUID_ORDER).toTypedArray()))
-                    st.executeUpdate()
+                // one statement per entity: in a single one, the cascade from one entity (its
+                // children, pairs pointing at it) would update a row the same command deletes
+                c.prepareStatement("delete from ecs_entity where id = ?").use { st ->
+                    for (id in deleted.sortedWith(UUID_ORDER)) {
+                        st.setObject(1, id)
+                        st.addBatch()
+                    }
+                    st.executeBatch()
                 }
             }
         } finally {
