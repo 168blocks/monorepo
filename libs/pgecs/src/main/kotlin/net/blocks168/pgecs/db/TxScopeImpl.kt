@@ -29,6 +29,16 @@ internal class TxScopeImpl(
         Guard(),
     ) as Connection
 
+    /** Per-transaction state of other pgecs layers (the write buffer), by type. */
+    private val attachments = java.util.concurrent.ConcurrentHashMap<Class<*>, Any>()
+
+    fun <T : Any> attachment(type: Class<T>, create: () -> T): T {
+        checkUsable()
+        return type.cast(attachments.computeIfAbsent(type) { create() })
+    }
+
+    fun <T : Any> peekAttachment(type: Class<T>): T? = attachments[type]?.let(type::cast)
+
     fun end() {
         active = false
     }
