@@ -413,12 +413,6 @@
    "pom": "sha256-4bHDgyyjrAqeVjxAX0x2ARi1VWpJINruFAWIhhl+CU0="
   }
  },
- "https://maven.vxcc.dev": {
-  "libs/dev/vxcc#tinyjcbor/1.1.0": {
-   "jar": "sha256-6XcJ/aTWoGeUd8ZpwFsee3Ijdr4M7kWMTUAlVD32FQs=",
-   "pom": "sha256-RCSvyqBYEElS6Si+QWmwuFGQIvB0VWN65JxuoCSdz1M="
-  }
- },
  "https://plugins.gradle.org/m2": {
   "com/google/code/gson#gson-parent/2.11.0": {
    "pom": "sha256-issfO3Km8CaRasBzW62aqwKT1Sftt7NlMn3vE6k2e3o="

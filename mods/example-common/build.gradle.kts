@@ -16,11 +16,8 @@ loom {
 
 dependencies {
     // project libraries are nested into the mod jar (jar-in-jar); Kotlin comes from fabric-language-kotlin
-    for (dep in listOf(project(":libs:common"), project(":libs:pgecs"))) {
-        implementation(dep)
-        include(dep)
-    }
-    include(libs.tinyjcbor)
+    implementation(project(":libs:pgecs"))
+    include(project(":libs:pgecs"))
     include(libs.postgresql)
     include(libs.hikaricp) // slf4j, coroutines and kotlinx.serialization come from Minecraft and fabric-language-kotlin
 }

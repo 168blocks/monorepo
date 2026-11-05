@@ -24,4 +24,4 @@ http://localhost:8080. Those are the main checkout's ports; other worktrees get 
 (`tools/network.sh env`, see AGENTS.md, "Several worktrees on one machine").
 
 Stack: Java 25, Kotlin 2.4, Gradle 9 (Kotlin DSL), Minecraft 26.3 / Fabric Loader 0.20, Velocity 4.3,
-Ktor 3.6, Compose Multiplatform 1.12, PostgreSQL 18, [tinyjcbor](https://github.com/alex-s168/tinyjcbor).
+Ktor 3.6, Compose Multiplatform 1.12, PostgreSQL 18.
