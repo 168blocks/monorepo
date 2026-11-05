@@ -1,6 +1,5 @@
 package net.blocks168.velocity.network
 
-import net.blocks168.pgecs.db.Database
 import net.blocks168.pgecs.PgEcsConfig
 import java.sql.Connection
 
@@ -8,6 +7,8 @@ import java.sql.Connection
  * The network plugin's tables (schema `network`), as plain SQL migrations in
  * `resources/net/blocks168/velocity/network/migrations`. Kept apart from the plugin's logic
  * ([NetworkStore] holds all queries) so it can move to pgecs once that has entities and components.
+ *
+ * Callers run [migrate] in their transaction (a pgecs `Database.tx`, or plain JDBC in [main]).
  *
  * Edges connect as `blocks_edge`, which may not create tables: the migrations run as the database owner
  * (`blocks`) from the core, via [main] (deploy/compose.yaml: service `network-schema`).
@@ -20,7 +21,7 @@ object NetworkSchema {
     val VERSION get() = MIGRATIONS.size
 
     /**
-     * Applies the missing migrations inside the caller's transaction ([Database.tx]); returns how many.
+     * Applies the missing migrations inside the caller's transaction (`Database.tx`); returns how many.
      * Safe to run concurrently (advisory lock).
      */
     fun migrate(connection: Connection): Int {
@@ -54,10 +55,32 @@ object NetworkSchema {
     }
 }
 
-/** Runs the migrations against PGECS_URL as PGECS_USER (the database owner), then exits. */
+/**
+ * Runs the migrations against PGECS_URL as PGECS_USER (the database owner), then exits. Plain pgjdbc,
+ * not a pgecs `Database`: run outside Velocity, this jar has no logging backend for its pool.
+ */
 fun main() {
-    Database.connectWithRetry(PgEcsConfig.fromEnv().copy(applicationName = "network-schema"), java.time.Duration.ofMinutes(2)).use { db ->
-        val n = db.tx("network:migrate") { NetworkSchema.migrate(connection) }
+    val config = PgEcsConfig.fromEnv()
+    val props = java.util.Properties().apply {
+        setProperty("user", config.user)
+        setProperty("ApplicationName", "network-schema")
+        setProperty("connectTimeout", "10")
+    }
+    val deadline = System.nanoTime() + java.time.Duration.ofMinutes(2).toNanos()
+    var connection: java.sql.Connection? = null
+    while (connection == null) {
+        try {
+            connection = org.postgresql.Driver().connect(config.jdbcUrl, props) ?: error("not a PostgreSQL JDBC URL: ${config.jdbcUrl}")
+        } catch (e: java.sql.SQLException) {
+            // the database container may still be starting
+            if (e.sqlState?.startsWith("08") != true && e.sqlState != "57P03" || System.nanoTime() > deadline) throw e
+            Thread.sleep(1000)
+        }
+    }
+    connection.use { c ->
+        c.autoCommit = false
+        val n = NetworkSchema.migrate(c)
+        c.commit()
         println("network schema: applied $n migration(s), now at version ${NetworkSchema.VERSION}")
     }
 }
