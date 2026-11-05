@@ -30,6 +30,9 @@ pgecs). Java 25 is the minimum: Minecraft 26.3 and Velocity 4.3 require it.
   * drain: `/network drain [edge]` makes the edge refuse logins and transfer its players (transfer
     packets, `accepts-transfers = true`) to the emptiest live edge (`network.edges`, each edge's
     `BLOCKS_EDGE_ADDRESS`); `/network undrain [edge]` ends it.
+  * no failover mid-connection (#56): when a server fails a player while connecting (e.g. in the
+    configuration phase), the edge disconnects them with a readable message instead of redirecting a
+    client that still configures for the failed server (that crashes it with duplicate registry keys).
   * maintenance: without the database (tunnel to the core gone, schema missing) the edge answers pings
     with "maintenance" and refuses logins.
   * schema: plain SQL migrations in the plugin (`NetworkSchema`, `resources/.../migrations`), run as the
