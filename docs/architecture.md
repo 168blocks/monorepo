@@ -21,6 +21,10 @@ pgecs). Java 25 is the minimum: Minecraft 26.3 and Velocity 4.3 require it.
   stand-in for the filter. Every edge renders its config from `deploy/edge-velocity/velocity.toml`
   and loads our plugins (`velocity/`). WireGuard and the cross-edge player registry are #22 and #23.
 * **Lobby servers**: one process each; Fabric + VMP, Async, FerriteCore, our mods.
+  The lobby world holds no state: a flat world of one grass layer at y=-64 with the spawn on top of it
+  at 0/-63/0, its chunks kept loaded, no time, weather or mobs (`deploy/fabric/lobby`: server.properties
+  and the datapack `world/datapacks/blocks168-lobby`). Staging deletes a lobby world generated from
+  other files there, so every checkout gets the same lobby.
 * **Main game server**: one process; Fabric + C2ME, VMP, ScalableLux, Async, FerriteCore, our mods.
 * **Creative testing servers**: one per player (they can invite others), several `MinecraftServer`
   instances in one JVM, started and stopped quickly. Not created yet (GitHub issue).
