@@ -19,6 +19,7 @@
   proot,
   bashInteractive,
   egglogWasm,
+  vodozemacWasm,
 }:
 let
   gradle = gradle_9.override { java = jdk; };
@@ -103,6 +104,8 @@ let
         BLOCKS_BASH = "${bashInteractive}/bin/bash";
         # libs/pgecs-eqsat compiles egglog (nix/egglog-wasm.nix) to JVM classes
         BLOCKS_EGGLOG_WASM = "${egglogWasm}/egglog.wasm";
+        # libs/vodozemac-endive compiles vodozemac (nix/vodozemac-wasm.nix) to JVM classes
+        BLOCKS_VODOZEMAC_WASM = "${vodozemacWasm}/vodozemac.wasm";
       };
 
       gradleFlags = [

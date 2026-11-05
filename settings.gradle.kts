@@ -17,6 +17,7 @@ include(":libs:pgecs-eqsat") // equality saturation (egglog on Endive) for the p
 include(":libs:pgecs-ksp") // KSP processor: pgecs query infix relations and write accessors
 include(":libs:pgecs-lambda") // bytecode decompiler for pgecs query lambdas (where, select, orderBy, ...)
 include(":libs:pgecs-query") // pgecs query engine: planner, eqsat optimisation, SQL compiler, plan cache
+include(":libs:vodozemac-endive") // vodozemac (Matrix E2EE) as wasm on Endive, for the backend's Trixnity
 include(":libs:b8-util") // b8 modules on pgecs systems: expiry
 include(":libs:api") // Kotlin Multiplatform backend API model, shared with the frontend
 

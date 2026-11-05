@@ -11,4 +11,5 @@ dependencies {
     implementation(libs.compose.gradle.plugin)
     implementation(libs.loom.gradle.plugin)
     implementation(libs.ksp.gradle.plugin)
+    implementation(libs.asm) // blocks.RewriteNativeMethods
 }
