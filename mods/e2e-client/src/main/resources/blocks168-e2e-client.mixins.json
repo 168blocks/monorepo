@@ -1,6 +1,6 @@
 {
   "required": true,
-  "package": "net.blocks168.mod.e2e.client.mixin",
+  "package": "dev.vxcc.b8.mod.e2e.client.mixin",
   "compatibilityLevel": "JAVA_25",
   "client": ["WindowMixin"],
   "injectors": { "defaultRequire": 1 }

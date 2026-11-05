@@ -5,5 +5,5 @@
   "description": "Example 168blocks Velocity plugin",
   "authors": ["168blocks"],
   "dependencies": [],
-  "main": "net.blocks168.velocity.example.ExamplePlugin"
+  "main": "dev.vxcc.b8.velocity.example.ExamplePlugin"
 }
