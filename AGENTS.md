@@ -89,26 +89,46 @@ Do not hard-code ports, container or project names in new scripts or tests: take
 
 ## Hermetic Nix build
 
-Besides `./dev ./gradlew ...` (Nix toolchain, Gradle downloads dependencies), the modules that do not
-need Minecraft also build in the Nix sandbox, without network, from locked dependencies
+Besides `./dev ./gradlew ...` (Nix toolchain, Gradle downloads dependencies), every module, the Fabric
+mods and `:deploy` included, also builds in the Nix sandbox, without network, from locked dependencies
 (`nix/gradle.nix`):
 
 ```sh
-nix build .#backend                  # also .#frontend-web, .#velocity-example-plugin, .#libs
-nix flake check                      # `gradlew build` with all tests (.#checks.<system>.gradle)
+nix build .#backend                  # also .#frontend-web, .#velocity-example-plugin, .#libs,
+                                     #   .#mods, .#fabric-server-launcher
+nix flake check                      # `gradlew build` with all tests and `:deploy:stage` (.#checks.<system>.gradle)
 nix run .#update-gradle-deps         # re-record nix/gradle-deps.json (from the repository root)
 ```
 
-`nix/gradle-deps.json` lists URL and hash of every file Gradle (and yarn, for Kotlin/Wasm) downloads;
-in the sandbox, mitm-cache serves them (nixpkgs `gradle.fetchDeps`). After changing a dependency,
-plugin, Kotlin or Gradle version, run `nix run .#update-gradle-deps` (it runs the whole hermetic build
-with tests) and commit the JSON with the change. Gradle in Nix is nixpkgs' `gradle_9`; keep
-`gradle/wrapper` on the same version.
+`nix/gradle-deps.json` lists URL and hash of every file Gradle (and yarn, for Kotlin/Wasm, and Fabric
+Loom, for Minecraft) downloads; in the sandbox, mitm-cache serves them (nixpkgs `gradle.fetchDeps`).
+After changing a dependency, plugin, Kotlin, Gradle or Minecraft version, run
+`nix run .#update-gradle-deps` (it runs the whole hermetic build with tests) and commit the JSON with
+the change. Gradle in Nix is nixpkgs' `gradle_9`; keep `gradle/wrapper` on the same version.
 
-Not hermetic: `mods/*` and `:deploy`, left out with `-Pblocks.minecraft=false` (`settings.gradle.kts`).
-Fabric Loom downloads Minecraft (version manifest, game jars, libraries) from Mojang while
-*configuring* those projects, and `:deploy` resolves the proxy jar, server launcher and mods from
-PaperMC, Fabric meta and Modrinth. Details: issue #8.
+What keeps the Minecraft modules hermetic:
+
+* **Loom reads a fixed version JSON.** By default Loom looks the version up in Mojang's
+  `version_manifest_v2.json`, which changes with every release and snapshot, so its hash cannot be
+  locked. `blocks.fabric-mod` sets `customMinecraftMetadata` to the version's own JSON at its
+  content-addressed URL, `piston-meta.mojang.com/v1/packages/<sha1>/<minecraft>.json`, with
+  `mojang-version-json-sha1` from `gradle/libs.versions.toml`. **When you bump `minecraft`, update that
+  SHA-1** (the `sha1` of the version's entry in the manifest). Everything else Loom downloads (client
+  and server jars, libraries and natives from libraries.minecraft.net) is named by hash in that JSON.
+  Minecraft 26.x is not obfuscated, so there are no mappings to fetch. Asset downloads
+  (`runClient`, `clientLaunch`) are not part of the hermetic build.
+* **The Fabric server launcher is built, not downloaded.** meta.fabricmc.net generates
+  `fabric-server-launch.jar` per request; `:deploy:fabricServerLauncher` builds the same jar from
+  `net.fabricmc:fabric-installer:<version>:server` plus an `install.properties` with the Minecraft and
+  loader versions (identical content to meta's).
+* `:deploy`'s other third-party files are immutable: the Velocity jar by SHA-256 from PaperMC fill,
+  the server mods by Modrinth version id.
+
+Still not hermetic: what the Fabric servers fetch when they *run*. On first start the launcher
+downloads the vanilla server jar and Fabric's libraries into the staged server directory
+(`deploy/build/stage/<server>/`). The staged network itself is not a package either (only checked):
+`:deploy:stage` generates the forwarding secret and WireGuard private keys, which do not belong in the
+Nix store. `-Pblocks.minecraft=false` still leaves the Minecraft modules out of a quick Gradle build.
 
 ## Java and Kotlin
 
