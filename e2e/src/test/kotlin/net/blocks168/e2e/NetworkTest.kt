@@ -26,7 +26,14 @@ class NetworkTest {
     @ParameterizedTest(name = "edge {0} reaches Velocity with the example plugin")
     @ValueSource(ints = [1, 2, 3])
     fun edgeReachesVelocity(edge: Int) {
-        val status = StatusPing.ping(network.edge(edge).host, network.edge(edge).port)
+        // the edge (HAProxy) accepts connections before Velocity behind it is up: retry for a while
+        val end = System.nanoTime() + 60_000_000_000L
+        var status: StatusPing.Status? = null
+        while (status == null) {
+            status = runCatching { StatusPing.ping(network.edge(edge).host, network.edge(edge).port) }
+                .onFailure { if (System.nanoTime() > end) throw it else Thread.sleep(1000) }
+                .getOrNull()
+        }
         // the MOTD is set by velocity/example-plugin (ProxyPingEvent), so this also checks the plugin
         assertTrue(status.description.startsWith("168blocks"), "MOTD was: ${status.description}")
         assertTrue(status.versionName.contains("Velocity"), "version was: ${status.versionName}")

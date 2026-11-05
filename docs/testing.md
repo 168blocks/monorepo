@@ -43,6 +43,18 @@ scenario("second player sees the first in the lobby") {
   `e2e/.../agent/`; `AgentTest` checks that Velocity reports its servers and that both Fabric servers
   report their worlds and run commands (`list`). The Fabric server tests are skipped unless
   `BLOCKS_ACCEPT_EULA=true`.
+* `bot.Bot`: the protocol-level bot client (see "Drivers" below), Minecraft 26.3 / protocol 777.
+  Offline login through an edge proxy and Velocity (compression, login plugin queries, cookies),
+  configuration (known packs, keep-alive, resource packs, code of conduct), play (keep-alive, ping,
+  teleport confirm, `player_loaded`, chunk batch acks, movement with `client_tick_end`, chat and
+  commands), server switches (`start_configuration`), and the positions of the other players it sees.
+  Packet ids are in `bot/PacketIds.kt`; a unit test checks them against the game's own report
+  (`src/test/resources/packets-26.3.json`, from `java -DbundlerMainClass=net.minecraft.data.Main -jar
+  server.jar --reports`). Formats come from the game's stream codecs (decompiled merged jar in the Loom
+  cache). `BotNetworkTest` joins through the edges, checks world and game mode, two bots meeting,
+  movement seen by another bot, chat, and `/server survival` and back. It needs the Minecraft servers
+  and is skipped unless `BLOCKS_ACCEPT_EULA=true`. The bot has no world model: it does not know the
+  terrain, so it can only make moves the caller knows are free.
 
 ### Design: drivers
 
