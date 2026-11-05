@@ -87,9 +87,11 @@ jobs:
 
       # A dependency missing from (or changed against) nix/gradle-deps.json shows up as a download
       # that mitm-cache cannot serve, or as a hash mismatch of the cache itself.
+      # Each package is its own Gradle build in its own sandbox: more than two at once exhaust the
+      # runner's memory (the job gets killed).
       - name: Packages
         run: |
-          nix build -L --keep-going --no-link \
+          nix build -L --keep-going --no-link --max-jobs 2 \
             .#backend .#frontend-web .#velocity-example-plugin .#libs \
             .#postgres-image .#runtime-image 2>&1 | tee nix-build.log
           exit "${PIPESTATUS[0]}"
