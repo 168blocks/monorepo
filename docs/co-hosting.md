@@ -51,6 +51,32 @@ Problems for co-hosting, checked in the bytecode:
 safe as long as no thread works for two servers at once; shared pools (C2ME's worldgen workers) only
 use them within one task.
 
+## Fixes (`mods/cohost-fixes`)
+
+`CoHost` tracks the servers running in the JVM (from `runServer` to `onServerExit`); the mixins keep
+JVM-wide actions for the last one:
+
+| Mixin | Fix |
+| --- | --- |
+| `C2meShutdownExitMixin` | cancels C2ME's `log4j2shutdownhookisnomore` handler (log4j shutdown + `System.exit`) while other servers run (MixinSquared `@TargetHandler`, only with C2ME loaded) |
+| `DedicatedServerMixin` | `stopServer` calls `Util.shutdownExecutors()` only for the last server |
+| `ServerWatchdogMixin` | a hung tick stops that server (`halt`) instead of exiting the JVM |
+| `BlockableEventLoopMixin` | `delayedCrash` per event loop; crashes relayed from shared worker threads are logged, not thrown into every server, while several run |
+| `CohostFixesMod` | starting a second server with Async loaded fails |
+
+`RegionFileVersion.selected` is set only by `Main` (the first server's `server.properties`), so
+servers started in-process share the host's region compression; nothing to fix.
+
+## Test (`mods/cohost-test`)
+
+`./dev ./gradlew :mods:cohost-test:cohostTest -PacceptMinecraftEula=true` (also in CI's network job)
+runs a Fabric server with C2ME, ScalableLux, VMP, FerriteCore, Fabric API and `cohost-fixes` under
+the static-guard agent in strict mode, each server thread bound to its own tenant. A dev-only mod
+then starts extra servers next to it: A gets a delayed crash, B a hung tick (its watchdog fires),
+C a clean stop, and after each the main server must still tick, the shared executors must still
+run tasks and the JVM must still be there. Any static written by two servers' threads throws in strict
+mode and fails the test; reviewed exceptions go into `mods/cohost-test/static-guard-allow.txt`.
+
 ## Recommendation
 
 * **Don't isolate with class loaders.** One class loader per server would hide every static, but

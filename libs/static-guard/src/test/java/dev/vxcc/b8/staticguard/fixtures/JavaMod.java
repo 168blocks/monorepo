@@ -9,6 +9,7 @@ public final class JavaMod {
 
     public static Server server; // the classic: "the" server, set on start
     public static int ticks;
+    public static long idCounter; // allowlisted in GuardTest
     public static final Map<String, String> CACHE = new HashMap<>();
     public static final Map<String, Integer> LENGTHS = new HashMap<>();
     public static final int[] COUNTS = new int[4];
@@ -23,6 +24,8 @@ public final class JavaMod {
     public static void tick() { ticks++; }
 
     public static int ticks() { return ticks; }
+
+    public static long nextId() { return ++idCounter; }
 
     public static void remember(String k, String v) { CACHE.put(k, v); }
 

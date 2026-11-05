@@ -31,3 +31,10 @@ tasks.withType<Test>().configureEach {
     dependsOn(agentJar)
     systemProperty("staticguard.agentJar", agentJar.get().archiveFile.get().asFile.absolutePath)
 }
+
+// lets other projects run with the agent: project(":libs:static-guard", "agentJar")
+configurations.create("agentJar") {
+    isCanBeConsumed = true
+    isCanBeResolved = false
+}
+artifacts.add("agentJar", agentJar)

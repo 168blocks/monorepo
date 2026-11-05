@@ -22,4 +22,8 @@ repositories {
         forRepository { maven("https://api.modrinth.com/maven") { name = "Modrinth" } }
         filter { includeGroup("maven.modrinth") }
     }
+    exclusiveContent {
+        forRepository { maven("https://maven.bawnorton.com/releases") { name = "Bawnorton" } }
+        filter { includeGroup("com.github.bawnorton.mixinsquared") }
+    }
 }

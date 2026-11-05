@@ -95,6 +95,28 @@ class GuardTest {
     }
 
     @Test
+    fun `bindThread does not pass the tenant to threads it starts`() {
+        setUp()
+        Tenants.bindThread(1)
+        call("JavaMod", "tick")
+        val t = Thread { call("JavaMod", "tick") } // a pool thread created by tenant 1: of no tenant
+        t.start(); t.join()
+        Tenants.unbind()
+        Tenants.runAs(2) { call("JavaMod", "server") }
+        assertEquals(emptyList(), Guard.violations().filter { it.field.endsWith("ticks") && it.tenantB != 2 })
+        assertTrue(Guard.violations().none { it.kind == "CROSS_WRITE" && it.field.endsWith("ticks") })
+    }
+
+    @Test
+    fun `allowed fields are never reported`() {
+        setUp()
+        Guard.allow("${fixtures}JavaMod.idCounter")
+        Tenants.runAs(1) { call("JavaMod", "nextId") }
+        Tenants.runAs(2) { call("JavaMod", "nextId") }
+        assertEquals(emptyList(), Guard.violations())
+    }
+
+    @Test
     fun `strict mode throws at the second tenant's write`() {
         setUp()
         Guard.setStrict(true)

@@ -78,13 +78,22 @@ public final class Guard {
         if (id >= 0 && readMode[id] == 0) readMode[id] = (byte) (container ? 3 : isFinal ? 1 : 2);
     }
 
+    /** Fields on the allowlist are never reported (reviewed shared state, e.g. a JVM-wide counter). */
+    public static void allow(String field) {
+        int id = id(field);
+        if (id >= 0) readMode[id] = 1;
+        if (id >= 0) allowed[id] = true;
+    }
+
+    private static final boolean[] allowed = new boolean[MAX_FIELDS];
+
     static void watch(String field) {
         int id = id(field);
         if (id >= 0) readMode[id] = 3;
     }
 
     public static void put(int id) {
-        if (id < 0) return;
+        if (id < 0 || allowed[id]) return;
         if (trace) countWrite(id);
         int t = Tenants.current();
         if (t == 0) return;

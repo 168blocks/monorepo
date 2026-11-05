@@ -18,6 +18,7 @@ import java.util.List;
  *   <li>{@code watch=<file>} fields ({@code owner/Name.field}, one per line, e.g. the scanner's {@code --fields}) whose reads are tracked;</li>
  *   <li>{@code isolate=<file>} fields to give per-tenant copies: {@code owner/Name.field [share|copy|reset]};</li>
  *   <li>{@code bind=<regex>=<tenant>} bind threads by name (repeatable), for hosts that do not call {@link Tenants#bind};</li>
+ *   <li>{@code allow=<file>} fields ({@code owner/Name.field}) never reported: reviewed shared state;</li>
  *   <li>{@code strict} throw on a write by a second tenant;</li>
  *   <li>{@code trace} count every static write, split into startup and runtime writes at the seal:
  *       {@code sealAfterMs=<ms>} after agent start, or {@code sealFile=<path>} once that file exists
@@ -36,7 +37,7 @@ public final class StaticGuardAgent {
         List<String> include = new ArrayList<>();
         List<String> exclude = new ArrayList<>(GuardTransformer.DEFAULT_EXCLUDE);
         String gets = null;
-        Path watch = null, isolate = null, report = null;
+        Path watch = null, isolate = null, report = null, allow = null;
         long sealAfter = -1;
         Path sealFile = null;
         for (String opt : args == null ? new String[0] : args.split(";")) {
@@ -49,6 +50,7 @@ public final class StaticGuardAgent {
                 case "gets" -> gets = v;
                 case "watch" -> watch = Path.of(v);
                 case "isolate" -> isolate = Path.of(v);
+                case "allow" -> allow = Path.of(v);
                 case "report" -> report = Path.of(v);
                 case "strict" -> Guard.strict = true;
                 case "trace" -> Guard.trace = true;
@@ -66,6 +68,7 @@ public final class StaticGuardAgent {
             : watch != null ? GuardTransformer.Gets.WATCH : GuardTransformer.Gets.ALL;
         GuardTransformer t = new GuardTransformer(include, exclude, g);
         if (watch != null) lines(watch).forEach(t::watch);
+        if (allow != null) lines(allow).forEach(l -> Guard.allow(l.split("\\s+")[0]));
         if (isolate != null) {
             for (String line : lines(isolate)) {
                 String[] p = line.split("\\s+");

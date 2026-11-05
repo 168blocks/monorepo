@@ -17,10 +17,14 @@ public final class Tenants {
     private static final class Binding {
         final int tenant;
         final String name; // thread name the binding was derived from (null: explicit)
-        Binding(int tenant, String name) { this.tenant = tenant; this.name = name; }
+        final boolean inherit;
+        Binding(int tenant, String name, boolean inherit) { this.tenant = tenant; this.name = name; this.inherit = inherit; }
     }
 
-    private static final InheritableThreadLocal<Binding> CURRENT = new InheritableThreadLocal<>();
+    private static final InheritableThreadLocal<Binding> CURRENT = new InheritableThreadLocal<>() {
+        @Override
+        protected Binding childValue(Binding parent) { return parent != null && parent.inherit ? parent : null; }
+    };
     private static final List<Pattern> namePatterns = new ArrayList<>();
     private static final List<Integer> nameTenants = new ArrayList<>();
     private static volatile boolean byName;
@@ -28,7 +32,16 @@ public final class Tenants {
     /** Binds the current thread (and the threads it starts from now on) to {@code tenant}. */
     public static void bind(int tenant) {
         if (tenant <= 0) throw new IllegalArgumentException("tenant ids are positive: " + tenant);
-        CURRENT.set(new Binding(tenant, null));
+        CURRENT.set(new Binding(tenant, null, true));
+    }
+
+    /**
+     * Binds only the current thread: threads it starts are of no tenant. For hosts whose instances
+     * start threads that end up shared (pools created lazily by whichever instance comes first).
+     */
+    public static void bindThread(int tenant) {
+        if (tenant <= 0) throw new IllegalArgumentException("tenant ids are positive: " + tenant);
+        CURRENT.set(new Binding(tenant, null, false));
     }
 
     public static void unbind() { CURRENT.remove(); }
@@ -53,7 +66,7 @@ public final class Tenants {
                 if (namePatterns.get(i).matcher(name).matches()) { t = nameTenants.get(i); break; }
             }
         }
-        CURRENT.set(new Binding(t, name));
+        CURRENT.set(new Binding(t, name, true));
         return t;
     }
 

@@ -131,7 +131,7 @@ PaperMC, Fabric meta and Modrinth. Details: issue #8.
 | `libs/api` | Kotlin Multiplatform (JVM + Wasm) backend API model, shared with the frontend |
 | `backend/` | Ktor backend; serves the API and the web frontend |
 | `frontend/` | Compose Multiplatform frontend: web (Kotlin/Wasm) and desktop |
-| `mods/<name>` | Fabric mods (Minecraft 26.3, Loom without remapping, fabric-language-kotlin). `mods/example-common`: server + client; `mods/e2e-client`: dev-only client RPC for e2e tests |
+| `mods/<name>` | Fabric mods (Minecraft 26.3, Loom without remapping, fabric-language-kotlin). `mods/example-common`: server + client; `mods/e2e-client`: dev-only client RPC for e2e tests; `mods/cohost-fixes`: several servers in one JVM (#6), tested by `mods/cohost-test` |
 | `velocity/<name>` | Velocity plugins (Kotlin, fat jar via `pluginJar`) |
 | `deploy/` | podman compose network (`compose.yaml`, WireGuard peers in `wireguard/peers.toml`) and the Gradle tasks that stage it (`:deploy:stage`, `:deploy:wireguard`) |
 | `e2e/` | End-to-end tests against the running network |

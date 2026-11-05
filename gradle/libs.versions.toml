@@ -39,6 +39,7 @@ mod-async = "gcduhoHv" # 0.2.5+alpha-26.3
 mod-c2me = "Vhj7rn6M" # 0.4.2-alpha.0.115+26.3
 mod-scalablelux = "g4eqNSKd" # 0.3.0-alpha.0.6+26.3
 mod-ferritecore = "d5ddUdiB" # 9.0.0-fabric
+mixinsquared = "0.3.7-beta.1" # mods/cohost-fixes; the version C2ME and Async bundle
 
 [libraries]
 kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
@@ -100,4 +101,5 @@ mod-async = { module = "maven.modrinth:async", version.ref = "mod-async" }
 mod-c2me = { module = "maven.modrinth:c2me-fabric", version.ref = "mod-c2me" }
 mod-scalablelux = { module = "maven.modrinth:scalablelux", version.ref = "mod-scalablelux" }
 mod-ferritecore = { module = "maven.modrinth:ferrite-core", version.ref = "mod-ferritecore" }
+mixinsquared = { module = "com.github.bawnorton.mixinsquared:mixinsquared-fabric", version.ref = "mixinsquared" }
 
