@@ -70,11 +70,12 @@ class HotShapes(
     }
 
     /**
-     * Reads the [limit] most used shapes through [connection] and compiles them in the background.
-     * The future completes when all are compiled; shapes that no longer parse or compile (the code
-     * changed) are skipped. Returns how many compiled.
+     * Reads the [limit] most used shapes through [connection] and compiles them in the background,
+     * then warms egglog up on them ([QueryEngine.warmUpAsync], [warmUpRuns] runs). The future
+     * completes when all are compiled (the warm-up goes on after); shapes that no longer parse or
+     * compile (the code changed) are skipped. Returns how many compiled.
      */
-    fun precompile(connection: Connection, limit: Int = 200): CompletableFuture<Int> {
+    fun precompile(connection: Connection, limit: Int = 200, warmUpRuns: Int = 300): CompletableFuture<Int> {
         // plans made without statistics would be re-made on first use
         engine.refreshStats(connection)
         val texts = connection.prepareStatement(
@@ -84,10 +85,11 @@ class HotShapes(
             st.setInt(2, limit)
             st.executeQuery().use { rs -> buildList { while (rs.next()) add(rs.getString(1)) } }
         }
-        val futures = texts.mapNotNull { text ->
-            val shape = runCatching { parse(text).validate() }.getOrNull() ?: return@mapNotNull null
-            engine.compileAsync(shape).handle { _, e -> e == null }
+        val shapes = texts.mapNotNull { runCatching { parse(it).validate() }.getOrNull() }
+        val futures = shapes.map { engine.compileAsync(it).handle { _, e -> e == null } }
+        return CompletableFuture.allOf(*futures.toTypedArray()).thenApply {
+            engine.warmUpAsync(shapes, warmUpRuns)
+            futures.count { it.join() }
         }
-        return CompletableFuture.allOf(*futures.toTypedArray()).thenApply { futures.count { it.join() } }
     }
 }

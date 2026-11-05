@@ -270,6 +270,25 @@ class QueryEngine(val config: QueryEngineConfig = QueryEngineConfig()) : AutoClo
         Mode.entries.forEach { statements.synchronous().invalidate(SqlKey(key, it)) }
     }
 
+    /**
+     * Warms egglog up: optimises [shapes] [runs] times in total, one at a time on a compile thread,
+     * bypassing the caches. egglog's JIT warm-up takes a few hundred runs and is shared by every
+     * instance, so doing it at startup keeps the first players' new query shapes fast. Uses one egglog
+     * instance at a time, so real compiles are not held up for long.
+     */
+    fun warmUpAsync(shapes: List<QueryIr>, runs: Int = 300): CompletableFuture<Void> {
+        if (shapes.isEmpty() || egglog == null) return CompletableFuture.completedFuture(null)
+        val plans = shapes.mapNotNull { runCatching { Lowering.lower(it).query }.getOrNull() }
+        if (plans.isEmpty()) return CompletableFuture.completedFuture(null)
+        val eqsat = EqsatOptimizer(egglog, config.eqsatIterations)
+        return CompletableFuture.runAsync({
+            for (i in 0 until runs) {
+                if (Thread.currentThread().isInterrupted) return@runAsync
+                runCatching { eqsat.optimize(plans[i % plans.size]) }
+            }
+        }, compileExecutor)
+    }
+
     /** Drops every cached plan, for example when a source is added or changes its capabilities. */
     fun invalidateAll() {
         plans.synchronous().invalidateAll()
