@@ -19,6 +19,10 @@ tasks.withType<Test>().configureEach {
     // 8000-bytecode limit (libs/pgecs-eqsat/README.md)
     jvmArgs("-XX:-DontCompileHugeMethods", "--enable-native-access=ALL-UNNAMED")
     maxHeapSize = "1g"
+    // RandomQueryTest: -Ppgecs.fuzz.seed=random -Ppgecs.fuzz.queries=100000 for a long run (see the test)
+    for (name in listOf("seed", "datasets", "queries", "case")) {
+        providers.gradleProperty("pgecs.fuzz.$name").orNull?.let { systemProperty("pgecs.fuzz.$name", it) }
+    }
 }
 
 // pgecs is published apart from the b8 code (dev.vxcc.b8, gradle.properties)

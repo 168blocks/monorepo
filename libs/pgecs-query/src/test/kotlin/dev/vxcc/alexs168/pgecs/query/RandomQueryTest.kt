@@ -1,82 +1,65 @@
 package dev.vxcc.alexs168.pgecs.query
 
-import dev.vxcc.alexs168.pgecs.ir.AggregateFn
-import dev.vxcc.alexs168.pgecs.ir.AnyEntity
-import dev.vxcc.alexs168.pgecs.ir.AnyRelation
-import dev.vxcc.alexs168.pgecs.ir.CompareOp
-import dev.vxcc.alexs168.pgecs.ir.ComponentKind
-import dev.vxcc.alexs168.pgecs.ir.ComponentRef
-import dev.vxcc.alexs168.pgecs.ir.EntityRef
-import dev.vxcc.alexs168.pgecs.ir.EntityVar
-import dev.vxcc.alexs168.pgecs.ir.Expr
-import dev.vxcc.alexs168.pgecs.ir.Functions
-import dev.vxcc.alexs168.pgecs.ir.IrBuilder
-import dev.vxcc.alexs168.pgecs.ir.IrValidationException
+import dev.vxcc.alexs168.pgecs.ir.Canonical
 import dev.vxcc.alexs168.pgecs.ir.QueryIr
-import dev.vxcc.alexs168.pgecs.ir.SortKey
-import dev.vxcc.alexs168.pgecs.ir.TermsBuilder
-import dev.vxcc.alexs168.pgecs.ir.ValueType
-import dev.vxcc.alexs168.pgecs.ir.ValueVar
 import dev.vxcc.alexs168.pgecs.ir.parameterize
+import dev.vxcc.alexs168.pgecs.query.sql.Mode
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.TestInstance
 import java.time.Duration
-import java.util.UUID
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
 /**
- * Random queries, run by the engine on PostgreSQL 18 (with and without equality saturation) and by
- * the reference [Oracle], must return the same rows. Seeded, so a failure reproduces; the message
- * names the query and its SQL.
+ * Differential and metamorphic testing of the query engine on PostgreSQL 18.
+ *
+ * Random queries ([FuzzGen]) over random datasets ([FuzzData]) run on the engine with and without
+ * equality saturation, and must return what the reference [Oracle] returns. On top of that, for
+ * each query:
+ *
+ * - the canonical text parses back to the same query;
+ * - the same shape with new arguments (a plan-cache hit, possibly with other parameters null)
+ *   agrees with the oracle too;
+ * - [Mode.COUNT] counts the rows;
+ * - ternary logic partitioning: the rows of `q` are the rows of `q ∧ p` plus those of `q ∧ ¬p`, for a
+ *   random predicate `p`. This needs no oracle, so it also catches what the oracle and the engine
+ *   get wrong the same way (SQL's three-valued logic leaking through, mostly).
+ *
+ * A failing query is shrunk ([FuzzShrink]) before it is reported, and the report says how to rerun
+ * exactly that case.
+ *
+ * Seeded and deterministic. System properties (Gradle properties of the same names are passed on,
+ * `-Ppgecs.fuzz.queries=100000`):
+ *
+ * | Property | Default | |
+ * | --- | --- | --- |
+ * | `pgecs.fuzz.seed` | 20261105 | a number, or `random` |
+ * | `pgecs.fuzz.datasets` | 4 | random datasets, each in its own schema |
+ * | `pgecs.fuzz.queries` | 1500 | valid queries in total, spread over the datasets |
+ * | `pgecs.fuzz.case` | | `<dataset>:<query>`, run only that case (from a failure report) |
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RandomQueryTest {
-    private val tags = listOf("t:a", "t:b", "t:c").map { ComponentRef("b8:$it", ComponentKind.TAG) }
-    private val rels = listOf("r:r", "r:q").map { ComponentRef("b8:$it", ComponentKind.RELATION) }
-    private val score = ComponentRef("b8:v:score", ComponentKind.VALUE, ValueType.INT)
-    private val json = ComponentRef("b8:v:json", ComponentKind.VALUE, ValueType.JSON)
-    private val names = listOf("ann", "Ann", "bob", "bobby", "c")
+    private val seed: Long = System.getProperty("pgecs.fuzz.seed").let {
+        when (it) {
+            null, "" -> 20261105L
+            "random" -> System.nanoTime()
+            else -> it.toLong()
+        }
+    }
+    private val datasets = System.getProperty("pgecs.fuzz.datasets")?.toInt() ?: 4
+    private val queries = System.getProperty("pgecs.fuzz.queries")?.toInt() ?: 1500
+    private val only: Pair<Int, Int>? = System.getProperty("pgecs.fuzz.case")?.takeIf { it.isNotBlank() }?.split(':')?.let { it[0].toInt() to it[1].toInt() }
 
-    private lateinit var db: TestDb
-    private lateinit var oracle: Oracle
-    private lateinit var entities: List<UUID>
     private lateinit var withEqsat: QueryEngine
     private lateinit var withoutEqsat: QueryEngine
+    private val engines get() = listOf("eqsat" to withEqsat, "simplifier" to withoutEqsat)
 
     @BeforeAll
     fun setUp() {
-        db = TestDb("random")
-        tags.forEach { db.type(it.name) }
-        rels.forEach { db.type(it.name, "relation") }
-        db.type(score.name, "value")
-        db.type(json.name, "value")
-        val rnd = Random(168)
-        entities = List(8) { db.entity() }
-        val rows = mutableListOf<Oracle.Row>()
-        val nil = UUID(0, 0)
-        for (e in entities) {
-            for (t in tags) if (rnd.nextInt(2) == 0) { db.add(e, t.name); rows += Oracle.Row(e, t.name, nil, null) }
-            for (r in rels) for (t in entities) if (rnd.nextInt(5) == 0) { db.add(e, r.name, t); rows += Oracle.Row(e, r.name, t, null) }
-            if (rnd.nextInt(3) != 0) {
-                val s = rnd.nextLong(-3, 4)
-                db.add(e, score.name, json = "$s")
-                rows += Oracle.Row(e, score.name, nil, s)
-            }
-            if (rnd.nextInt(3) != 0) {
-                val name = names.random(rnd)
-                val n: Long? = if (rnd.nextInt(3) == 0) null else rnd.nextLong(0, 3)
-                val missing = n == null && rnd.nextBoolean()
-                val text = if (missing) """{"name":"$name"}""" else """{"name":"$name","n":${n ?: "null"}}"""
-                db.add(e, json.name, json = text)
-                rows += Oracle.Row(e, json.name, nil, if (missing) mapOf("name" to name) else mapOf("name" to name, "n" to n))
-            }
-        }
-        db.exec("analyze")
-        oracle = Oracle(rows)
         withEqsat = QueryEngine(QueryEngineConfig(eqsatTimeout = Duration.ofSeconds(30)))
         withoutEqsat = QueryEngine(QueryEngineConfig(eqsatInstances = 0))
     }
@@ -85,176 +68,171 @@ class RandomQueryTest {
     fun tearDown() {
         withEqsat.close()
         withoutEqsat.close()
-        db.close()
     }
 
-    /** One generated query with its argument values. */
-    private class Case(val query: QueryIr, val args: List<Any?>)
+    private fun mix(vararg xs: Long): Long = xs.fold(0x9E3779B97F4A7C15uL.toLong()) { h, x -> (h xor x) * -0x40a7b892e31b1a47L }.let { it xor (it ushr 31) }
 
-    private inner class Gen(val rnd: Random) {
-        val args = mutableListOf<Any?>()
-        lateinit var b: IrBuilder
-        val bound = mutableListOf<EntityVar>()
-        val scores = mutableListOf<ValueVar>()
-        val jsons = mutableListOf<ValueVar>()
-        var vars = 0
-
-        fun param(type: ValueType, value: Any?): Expr.Param = b.param(type).also { args += value }
-
-        fun entityRef(allowNew: Boolean, allowAny: Boolean = true): EntityRef = when (rnd.nextInt(10)) {
-            in 0..4 -> if (allowNew || bound.isEmpty()) b.entity("e${vars++}").also { bound += it } else bound.random(rnd)
-            in 5..6 -> if (bound.isNotEmpty()) bound.random(rnd) else b.entity("e${vars++}").also { bound += it }
-            7 -> if (allowAny) AnyEntity else bound.randomOrNull(rnd) ?: b.entity("e${vars++}").also { bound += it }
-            else -> param(ValueType.UUID, entities.random(rnd))
-        }
-
-        /** A match into [t]; binds variables into [bound]. */
-        fun match(t: TermsBuilder, allowNew: Boolean) {
-            when (rnd.nextInt(7)) {
-                0, 1 -> t.match(entityRef(allowNew, allowAny = false), tags.random(rnd))
-                2, 3 -> t.match(entityRef(allowNew), rels.random(rnd), target = entityRef(allowNew))
-                4 -> t.match(entityRef(allowNew, allowAny = false), AnyRelation(), target = entityRef(allowNew, allowAny = false))
-                5 -> {
-                    val v = b.value("s${vars++}", ValueType.INT)
-                    t.match(entityRef(allowNew, allowAny = false), score, value = v)
-                    scores += v
-                }
-                else -> {
-                    val v = b.value("j${vars++}", ValueType.JSON)
-                    t.match(entityRef(allowNew, allowAny = false), json, value = v)
-                    jsons += v
-                }
-            }
-        }
-
-        fun pred(depth: Int): Expr = if (depth > 4) Expr.Literal.of(rnd.nextBoolean()) else when (if (depth > 2) rnd.nextInt(5) else rnd.nextInt(9)) {
-            0 -> if (scores.isNotEmpty()) {
-                Expr.Compare(CompareOp.entries.random(rnd), Expr.Var(scores.random(rnd)), Expr.Literal.of(rnd.nextLong(-2, 3)))
-            } else {
-                pred(depth + 1)
-            }
-            1 -> if (jsons.isNotEmpty()) {
-                val name = Expr.Field(jsons.random(rnd), listOf("name"), ValueType.TEXT.asNullable())
-                when (rnd.nextInt(3)) {
-                    0 -> Expr.Compare(CompareOp.EQ, name, Expr.Literal.of(names.random(rnd)))
-                    1 -> Expr.Compare(CompareOp.EQ, Functions.call(Functions.LOWERCASE, name), param(ValueType.TEXT, names.random(rnd).lowercase()))
-                    else -> Expr.Compare(CompareOp.NE, name, param(ValueType.TEXT.asNullable(), if (rnd.nextBoolean()) null else names.random(rnd)))
-                }
-            } else {
-                pred(depth + 1)
-            }
-            2 -> if (jsons.isNotEmpty()) {
-                val n = Expr.Field(jsons.random(rnd), listOf("n"), ValueType.INT.asNullable())
-                when (rnd.nextInt(3)) {
-                    0 -> Expr.IsNull(n)
-                    1 -> Expr.Compare(if (rnd.nextBoolean()) CompareOp.EQ else CompareOp.NE, n, param(ValueType.INT.asNullable(), if (rnd.nextBoolean()) null else rnd.nextLong(0, 3)))
-                    else -> Expr.Compare(CompareOp.EQ, Expr.Coalesce(listOf(n, Expr.Literal.of(-1L))), Expr.Literal.of(rnd.nextLong(-1, 3)))
-                }
-            } else {
-                pred(depth + 1)
-            }
-            3 -> if (bound.size >= 2) {
-                Expr.Compare(if (rnd.nextBoolean()) CompareOp.EQ else CompareOp.NE, Expr.Var(bound.random(rnd)), Expr.Var(bound.random(rnd)))
-            } else {
-                pred(depth + 1)
-            }
-            4 -> if (bound.isNotEmpty()) existsProbe() else pred(depth + 1)
-            5 -> Expr.Not(pred(depth + 1))
-            6 -> Expr.And(listOf(pred(depth + 1), pred(depth + 1)))
-            7 -> Expr.Or(listOf(pred(depth + 1), pred(depth + 1)))
-            else -> if (bound.isNotEmpty()) existsChild() else pred(depth + 1)
-        }
-
-        /** `x has T` or `x has (R, y)` with only bound variables. */
-        fun existsProbe(): Expr = b.exists {
-            val x = bound.random(rnd)
-            if (rnd.nextBoolean()) match(x, tags.random(rnd)) else match(x, rels.random(rnd), target = if (rnd.nextBoolean()) AnyEntity else bound.random(rnd))
-        }
-
-        /** "has a child that ...": a local variable. */
-        fun existsChild(): Expr = b.exists {
-            val c = b.entity("x${vars++}")
-            match(c, rels.random(rnd), target = bound.random(rnd))
-            match(c, tags.random(rnd))
-        }
-
-        fun query(): Case {
-            b = IrBuilder()
-            repeat(1 + rnd.nextInt(3)) { match(b, allowNew = true) }
-            if (rnd.nextInt(3) == 0) {
-                // variables bound only in the group may be null outside it; queries that compare them
-                // in ways the validator rejects (ordering a nullable value) are skipped
-                b.optional { repeat(1 + rnd.nextInt(2)) { match(this, allowNew = true) } }
-            }
-            repeat(rnd.nextInt(3)) { b.filter(pred(0)) }
-            val selected = bound.distinct().take(2)
-            if (selected.isEmpty()) b.select("one", Expr.Literal.of(1L)) else selected.forEach { b.select(it) }
-            when (rnd.nextInt(6)) {
-                0 -> b.distinct()
-                1 -> if (selected.isNotEmpty()) {
-                    b.groupBy(Expr.Var(selected[0]))
-                    val q = b.buildUnchecked()
-                    // keep only the grouped column, plus a count
-                    val bb = q.copy(
-                        select = listOf(q.select.first { it.expr == Expr.Var(selected[0]) }, dev.vxcc.alexs168.pgecs.ir.Projection("n", Expr.Aggregate(AggregateFn.COUNT, null))),
-                    )
-                    return Case(bb.validate(), args.toList())
-                }
-                2 -> selected.firstOrNull()?.let { b.orderBy(SortKey(Expr.Var(it), descending = rnd.nextBoolean())) }
-                else -> {}
-            }
-            return Case(b.build(), args.toList())
-        }
-    }
-
-    private fun normalize(rows: List<List<Any?>>, ordered: Boolean): List<String> {
-        val s = rows.map { r -> r.joinToString("|") { (it as? Double)?.let { d -> "%.6f".format(d) } ?: it.toString() } }
-        return if (ordered) s else s.sorted()
+    private class Stats {
+        var generated = 0
+        var invalid = 0
+        var tooLarge = 0
+        var checked = 0
+        var partitioned = 0
+        var aggregate = 0
+        var ordered = 0
+        var paged = 0
+        var optional = 0
+        var rows = 0L
     }
 
     @Test
-    fun `random queries agree with the reference evaluator`() {
-        val rnd = Random(20261105)
-        var checked = 0
-        var attempts = 0
-        while (checked < 1000 && attempts < 20000) {
-            attempts++
-            val case = try {
-                Gen(rnd).query()
-            } catch (_: IrValidationException) {
-                continue
-            } catch (_: IllegalArgumentException) {
-                continue
-            }
-            checked++
-            val expected = oracle.run(case.query, case.args)
-            val ordered = case.query.orderBy.isNotEmpty()
-            for ((name, engine) in listOf("eqsat" to withEqsat, "simplifier" to withoutEqsat)) {
-                val actual = try {
-                    engine.execute(db.connection, case.query, case.args).map { it.toList() }
-                } catch (e: Exception) {
-                    fail("[$name] failed: ${describe(engine, case)}", e)
-                }
-                // with order by, compare the order keys' sequence (ties may come in any order)
-                val exp = if (ordered) normalize(expected.map { listOf(it[0]) }, true) else normalize(expected, false)
-                val act = if (ordered) normalize(actual.map { listOf(it[0]) }, true) else normalize(actual, false)
-                if (ordered) {
-                    if (normalize(expected, false) != normalize(actual, false) || exp != act) {
-                        fail("[$name] wrong rows\nexpected $expected\nactual   $actual\n${describe(engine, case)}")
+    fun `random queries agree with the reference evaluator and with themselves`() {
+        val stats = Stats()
+        val perDataset = (queries + datasets - 1) / datasets
+        for (d in 0 until datasets) {
+            if (only != null && only.first != d) continue
+            FuzzData(mix(seed, d.toLong())).use { data ->
+                withEqsat.refreshStats(data.db.connection, force = true)
+                // use counts per shape are kept until HotShapes flushes them; a real process has few shapes
+                engines.forEach { (_, e) -> e.uses.clear() }
+                var attempts = 0
+                var valid = 0
+                while (valid < perDataset && attempts < perDataset * 20) {
+                    val i = attempts++
+                    if (only != null && only.second != i) continue
+                    stats.generated++
+                    val case = try {
+                        FuzzGen(Random(mix(seed, d.toLong(), i.toLong())), data.entities).query()
+                    } catch (_: IllegalArgumentException) {
+                        // IrValidationException included: the generator does not track every rule
+                        stats.invalid++
+                        continue
                     }
-                } else if (exp != act) {
-                    fail("[$name] wrong rows\nexpected $expected\nactual   $actual\n${describe(engine, case)}")
+                    // naive evaluation of a large cross product takes too long (and the engine returns as many rows)
+                    try {
+                        data.oracle.run(case.query, case.args)
+                    } catch (_: Oracle.TooLarge) {
+                        stats.tooLarge++
+                        continue
+                    }
+                    valid++
+                    stats.checked++
+                    if (case.query.isAggregate) stats.aggregate++
+                    if (case.query.orderBy.isNotEmpty()) stats.ordered++
+                    if (case.query.limit != null || case.query.offset != null) stats.paged++
+                    if (case.query.terms.any { it is dev.vxcc.alexs168.pgecs.ir.Term.Optional }) stats.optional++
+                    if (case.partition != null) stats.partitioned++
+                    check(data, d, i, case, stats)
                 }
+                assertTrue(only != null || valid == perDataset, "dataset $d: only $valid valid queries in $attempts attempts")
             }
         }
-        assertTrue(checked >= 800, "only $checked valid random queries")
-        println("checked $checked random queries ($attempts generated); eqsat engine: ${withEqsat.metrics()}")
+        println(
+            "seed $seed: checked ${stats.checked} random queries (${stats.generated} generated, ${stats.invalid} invalid, ${stats.tooLarge} too large), " +
+                "${stats.aggregate} aggregate, ${stats.ordered} ordered, ${stats.paged} paged, ${stats.optional} with optional groups, " +
+                "${stats.partitioned} partitioned; ${stats.rows} result rows; eqsat engine: ${withEqsat.metrics()}",
+        )
     }
 
-    private fun describe(engine: QueryEngine, c: Case): String {
-        val bound = c.query.parameterize(c.args)
+    private fun check(data: FuzzData, d: Int, i: Int, case: FuzzCase, stats: Stats) {
+        val repro = "reproduce with -Ppgecs.fuzz.seed=$seed -Ppgecs.fuzz.datasets=$datasets -Ppgecs.fuzz.queries=$queries -Ppgecs.fuzz.case=$d:$i"
+        fun failShrunk(what: String, q: QueryIr, args: List<Any?>, message: String): Nothing {
+            val (small, msg) = FuzzShrink.shrink(FuzzShrink.Candidate(q, args)) { c -> agree(data, c.query, c.args) }
+            fail(
+                "$what\n$message\n\nshrunk to:\n${msg ?: "(no longer fails)"}\n${describe(small.query, small.args)}\n\n" +
+                    "original:\n${describe(q, args)}\n\n$repro",
+            )
+        }
+
+        agree(data, case.query, case.args, stats)?.let { failShrunk("wrong result", case.query, case.args, it) }
+
+        val again = case.rebind(Random(mix(seed, d.toLong(), i.toLong(), 1)))
+        agree(data, case.query, again)?.let { failShrunk("wrong result with other arguments for a cached shape", case.query, again, it) }
+
+        val p = case.partition ?: return
+        for (q in listOf(p.whenTrue, p.whenFalse)) {
+            agree(data, q, p.args)?.let { failShrunk("wrong result for a partition", q, p.args, it) }
+        }
+        for ((name, engine) in engines) {
+            val all = normalize(run(engine, data, case.query, case.args)).sorted()
+            val parts = normalize(run(engine, data, p.whenTrue, p.args) + run(engine, data, p.whenFalse, p.args)).sorted()
+            val same = if (case.query.distinct) all.toSet() == parts.toSet() else all == parts
+            if (!same) {
+                fail(
+                    "[$name] partitioning: q has ${all.size} rows, q ∧ p and q ∧ ¬p ${parts.size}\n" +
+                        "q:\n${describe(case.query, case.args)}\nq ∧ p:\n${describe(p.whenTrue, p.args)}\nq ∧ ¬p:\n${describe(p.whenFalse, p.args)}\n$repro",
+                )
+            }
+        }
+    }
+
+    private fun run(engine: QueryEngine, data: FuzzData, q: QueryIr, args: List<Any?>, mode: Mode = Mode.FETCH): List<List<Any?>> =
+        engine.execute(data.db.connection, q, args, mode).map { it.toList() }
+
+    /** Null if the engines agree with the oracle on [q], else what went wrong. */
+    private fun agree(data: FuzzData, q: QueryIr, args: List<Any?>, stats: Stats? = null): String? {
+        val parsed = runCatching { Canonical.parse(q.canonicalText) }
+        if (parsed.getOrNull() != q) return "canonical text does not parse back: ${parsed.exceptionOrNull() ?: parsed.getOrNull()?.canonicalText}"
+        val expected = try {
+            data.oracle.run(q, args)
+        } catch (e: Oracle.TooLarge) {
+            return null // a partition or a shrinking step grew the cross product: nothing to compare
+        } catch (e: Exception) {
+            return "the oracle failed: $e"
+        }
+        stats?.let { it.rows += expected.size }
+        for ((name, engine) in engines) {
+            val actual = try {
+                run(engine, data, q, args)
+            } catch (e: Exception) {
+                return "[$name] failed: $e"
+            }
+            mismatch(q, expected, actual)?.let { return "[$name] $it" }
+        }
+        val count = try {
+            run(withEqsat, data, q, args, Mode.COUNT).single()[0]
+        } catch (e: Exception) {
+            return "[eqsat] count failed: $e"
+        }
+        if (count != expected.size.toLong()) return "[eqsat] count is $count, expected ${expected.size}"
+        return null
+    }
+
+    private fun mismatch(q: QueryIr, expected: List<List<Any?>>, actual: List<List<Any?>>): String? {
+        val wrong = "wrong rows\nexpected ${show(expected)}\nactual   ${show(actual)}"
+        val keyCols = q.orderBy.mapNotNull { k -> q.select.indexOfFirst { it.expr == k.expr }.takeIf { it >= 0 } }.distinct()
+        val e = normalize(expected)
+        val a = normalize(actual)
+        if (q.limit != null || q.offset != null) {
+            // the generator orders by every column when paging, so the rows are determined; a shrunk
+            // query may not be, and then only the number of rows is
+            return when {
+                keyCols.size == q.select.size -> if (e != a) wrong else null
+                else -> if (e.size != a.size) wrong else null
+            }
+        }
+        if (e.sorted() != a.sorted()) return wrong
+        if (keyCols.isNotEmpty()) {
+            val ek = expected.map { r -> keyCols.joinToString("|") { show(r[it]) } }
+            val ak = actual.map { r -> keyCols.joinToString("|") { show(r[it]) } }
+            if (ek != ak) return "wrong order\nexpected ${show(expected)}\nactual   ${show(actual)}"
+        }
+        return null
+    }
+
+    private fun normalize(rows: List<List<Any?>>): List<String> = rows.map { r -> r.joinToString("|") { show(it) } }
+
+    private fun show(v: Any?): String = when (v) {
+        is Double -> "%.6f".format(v)
+        is String -> Canonical.quote(v)
+        is List<*> -> v.joinToString(", ", "[", "]") { show(it) }
+        else -> v.toString()
+    }
+
+    private fun describe(q: QueryIr, args: List<Any?>): String {
+        val bound = q.parameterize(args)
         val nulls = bound.arguments.indices.filter { bound.arguments[it] == null }.toSet()
-        val sql = runCatching { engine.compile(bound.shape, nulls).toString() }.getOrElse { "compile failed: $it" }
-        return "${c.query.canonicalText}\nargs ${c.args}\n$sql"
+        val sql = runCatching { withEqsat.compile(bound.shape, nulls).toString() }.getOrElse { "compile failed: $it" }
+        return "${q.canonicalText}\nargs ${show(args)}\n$sql"
     }
 }

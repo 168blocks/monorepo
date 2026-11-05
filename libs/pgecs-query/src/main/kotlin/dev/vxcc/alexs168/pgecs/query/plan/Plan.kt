@@ -356,12 +356,17 @@ fun walk(p: Pred, f: (Expr) -> Unit) {
     }
 }
 
-/** The scan aliases [e] reads. */
+/**
+ * The scan aliases [e] reads, including those of enclosing blocks that `exists` blocks inside it
+ * read (a projection or `if` condition `x has T`).
+ */
 fun aliasesOf(e: Expr): Set<Int> = buildSet {
     walk(e) {
         when (it) {
             is Expr.Col -> add(it.alias)
             is Expr.Field -> add(it.alias)
+            is Expr.Bool -> addExistsAliases(it.pred)
+            is Expr.If -> addExistsAliases(it.condition)
             else -> {}
         }
     }
@@ -370,16 +375,18 @@ fun aliasesOf(e: Expr): Set<Int> = buildSet {
 /** The scan aliases [p] reads, including those of enclosing blocks that nested `exists` blocks read. */
 fun aliasesOf(p: Pred): Set<Int> = buildSet {
     walk(p) { e -> addAll(aliasesOf(e)) }
-    fun visitExists(q: Pred) {
-        when (q) {
-            is Pred.Exists -> addAll(freeAliases(q.block))
-            is Pred.And -> q.items.forEach(::visitExists)
-            is Pred.Or -> q.items.forEach(::visitExists)
-            is Pred.Not -> visitExists(q.pred)
-            else -> {}
-        }
+    addExistsAliases(p)
+}
+
+/** The free aliases of the `exists` blocks of [p] (not those inside its expressions: [walk] reaches those). */
+private fun MutableSet<Int>.addExistsAliases(p: Pred) {
+    when (p) {
+        is Pred.Exists -> addAll(freeAliases(p.block))
+        is Pred.And -> p.items.forEach { addExistsAliases(it) }
+        is Pred.Or -> p.items.forEach { addExistsAliases(it) }
+        is Pred.Not -> addExistsAliases(p.pred)
+        else -> {}
     }
-    visitExists(p)
 }
 
 /** The aliases of enclosing blocks that [block] (with its optionals and nested blocks) refers to. */

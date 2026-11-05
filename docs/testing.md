@@ -8,6 +8,26 @@ Three levels, cheapest first:
 | Integration | e.g. `libs/pgecs`, `backend` | `./dev ./gradlew build` | real PostgreSQL from Nix (`TestPostgres`) |
 | End to end | `e2e/` | `tools/network.sh test` | the whole network on podman (`deploy/compose.yaml`) |
 
+## Randomized tests of the pgecs query engine
+
+`libs/pgecs-query`'s `RandomQueryTest` generates random first-level IR queries (`FuzzGen`: every kind
+of match, optional groups, predicates and expressions of every IR type, aggregates, distinct,
+order-by, paging) over random datasets (`FuzzData`, one schema each) and checks the engine, with and
+without equality saturation, against a naive reference evaluator (`Oracle`). It also checks
+properties that need no oracle: ternary logic partitioning (the rows of `q` are those of `q ∧ p`
+plus those of `q ∧ ¬p`), the same shape with other arguments (plan-cache hits), `Mode.COUNT`, and that
+the canonical text parses back. A failure is shrunk (`FuzzShrink`) to a small query before it is
+reported, with the SQL and the Gradle properties that rerun exactly that case.
+
+The build runs 1500 queries with a fixed seed (about a minute). For a longer run:
+
+```sh
+./dev ./gradlew :libs:pgecs-query:test --tests '*RandomQueryTest*' \
+  -Ppgecs.fuzz.seed=random -Ppgecs.fuzz.queries=100000 -Ppgecs.fuzz.datasets=50
+```
+
+The seed is printed at the end (and in a failure, with `-Ppgecs.fuzz.case=<dataset>:<query>`).
+
 ## End-to-end tests of the network
 
 Goal: tests that read like what a player and an operator would check, against the real network
