@@ -11,7 +11,6 @@
 # worktrees can run their networks side by side. Defaults (instance slot 0):
 #   25501-25503  edge proxies 1-3 (what players connect to)
 #   8080         backend (+ web frontend)
-#   55432        PostgreSQL (5432 is often taken by a host PostgreSQL)
 #   8333         S3 API (SeaweedFS)
 #   28500-28502  e2e agents (dev only): velocity, lobby, survival (BLOCKS_E2E_AGENT_PORT in the container)
 # Images are tagged by their Nix store hash (BLOCKS_*_IMAGE), so worktrees on different versions of
@@ -25,7 +24,6 @@ x-jvm: &jvm
   environment: &jvm-env
     PGECS_URL: jdbc:postgresql://postgres:5432/blocks
     PGECS_USER: blocks
-    PGECS_PASSWORD: blocks-dev
 
 x-edge: &edge
   image: docker.io/library/haproxy:3.2-alpine
@@ -39,13 +37,12 @@ services:
     # PostgreSQL 18 with pg_jsonschema (required by pgecs), built by Nix (flake.nix: postgres-image)
     image: ${BLOCKS_POSTGRES_IMAGE:-localhost/168blocks/postgres:latest}
     restart: unless-stopped
+    # No passwords and no host port: only containers on this compose network can connect, as role
+    # `blocks`; see nix/postgres-entrypoint.sh. Admin: `tools/network.sh psql`.
     environment:
       POSTGRES_DB: blocks
-      POSTGRES_USER: blocks
-      POSTGRES_PASSWORD: blocks-dev
     volumes:
       - postgres:/var/lib/postgresql
-    ports: ["127.0.0.1:${BLOCKS_POSTGRES_PORT:-55432}:5432"]
     # no healthcheck: podman runs those through systemd timers, which not every host has. The
     # services retry their database connection instead (PgEcs.connect with retry).
 

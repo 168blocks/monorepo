@@ -68,7 +68,9 @@ class PgEcs private constructor(
                                 "(the Nix dev shell and deploy/compose.yaml provide a PostgreSQL with it)",
                         )
                     }
-                    st.execute("create extension if not exists $ext")
+                    val installed = st.executeQuery("select 1 from pg_extension where extname = '$ext'").use { it.next() }
+                    // needs a privileged role; deployments create it up front (nix/postgres-entrypoint.sh)
+                    if (!installed) st.execute("create extension $ext")
                 }
             }
         }
@@ -97,7 +99,6 @@ class PgEcs private constructor(
             val driver = org.postgresql.Driver()
             val props = java.util.Properties().apply {
                 setProperty("user", config.user)
-                setProperty("password", config.password)
                 setProperty("ApplicationName", "pgecs")
             }
             val connection = driver.connect(config.jdbcUrl, props)
