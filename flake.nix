@@ -90,6 +90,7 @@
           jdk = jdkFor pkgs;
           postgresql = postgresFor pkgs;
           egglogWasm = egglogWasmFor pkgs;
+          vodozemacJni = vodozemacJniFor pkgs;
         };
     in
     {
