@@ -125,6 +125,7 @@ PaperMC, Fabric meta and Modrinth. Details: issue #8.
 | `libs/pgecs` | ACID persistent ECS on PostgreSQL (backend, mods, Velocity plugins). Test fixture `TestPostgres` starts a throwaway server from Nix |
 | `libs/pgecs-ir` | First-level query IR of pgecs: what the DSL and lambda decompiler produce, what the planner and SQL compiler consume, and the plan-cache key |
 | `libs/pgecs-eqsat` | Equality saturation for the pgecs planner: egglog (Rust, `egglog-wasi/`) built to wasm32-wasip1 by Nix (`nix/egglog-wasm.nix`), compiled to JVM classes by Endive at build time |
+| `libs/vodozemac-endive` | vodozemac (Matrix E2EE) built to wasm32 by Nix (`nix/vodozemac-wasm.nix`), compiled to JVM classes by Endive, with Trixnity's JNI bindings rewritten to call it (backend Matrix bot, `docs/matrix-bot.md`) |
 | `libs/b8-util` | b8 modules on pgecs systems: expiry (`b8:util:expires-slow:v1`, `Expiry.install`) |
 | `libs/api` | Kotlin Multiplatform (JVM + Wasm) backend API model, shared with the frontend |
 | `backend/` | Ktor backend; serves the API and the web frontend |

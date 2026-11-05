@@ -44,27 +44,15 @@ tasks.register<JavaExec>("runDiscordExample") {
     mainClass.set("dev.vxcc.b8.backend.discord.DiscordExampleKt")
 }
 
-// Matrix bot: vodozemac's JNI library comes from Nix (nix/vodozemac-jni.nix, BLOCKS_VODOZEMAC_JNI in the dev
-// shell) instead of Trixnity's prebuilt glibc binaries. Trixnity loads natives/<os>-<arch>/libvodozemac.so
-// from the classpath, so the Nix output goes into this module's resources (and the staged backend's jar).
+// Matrix bot: vodozemac runs as wasm on Endive (libs/vodozemac-endive) instead of as a JNI library, so the
+// backend has no native code and no per-platform build. That module carries trixnity-vodozemac-jvm's classes,
+// rewritten to call the wasm build, and replaces the original (and its prebuilt glibc binaries) everywhere.
 configurations.configureEach {
     exclude(group = "de.connect2x.trixnity", module = "trixnity-vodozemac-binaries")
     exclude(group = "de.connect2x.trixnity", module = "trixnity-vodozemac-binaries-jvm")
-}
-
-val vodozemacJni: Provider<String> = providers.environmentVariable("BLOCKS_VODOZEMAC_JNI").orElse("")
-
-tasks.processResources {
-    val jni = vodozemacJni
-    // the Nix store is read-only: give the copies normal permissions, or Gradle cannot create the
-    // nested directories inside its read-only copy of natives/ (and later clean them)
-    from(jni.map { if (it.isEmpty()) emptyList() else listOf(it) }) {
-        dirPermissions { unix("rwxr-xr-x") }
-        filePermissions { unix("rw-r--r--") }
-    }
-    doFirst {
-        if (jni.get().isEmpty()) {
-            throw GradleException("BLOCKS_VODOZEMAC_JNI is not set: run Gradle in the Nix dev shell (./dev ./gradlew ...)")
-        }
+    resolutionStrategy.dependencySubstitution {
+        substitute(module("de.connect2x.trixnity:trixnity-vodozemac-jvm"))
+            .using(project(":libs:vodozemac-endive"))
+            .because("vodozemac as wasm instead of JNI")
     }
 }
