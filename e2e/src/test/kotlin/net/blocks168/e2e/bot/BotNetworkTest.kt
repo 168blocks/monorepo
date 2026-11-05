@@ -109,28 +109,35 @@ class BotNetworkTest {
     fun followsVelocityServerSwitches() {
         join("alice", 1).use { alice ->
             assertEquals(GameMode.ADVENTURE, alice.gameMode)
-            switch(alice, "survival", joins = 2)
-            assertEquals(GameMode.SURVIVAL, alice.gameMode, "survival runs in survival mode")
+            // survival runs in survival mode, the lobby in adventure mode: that tells the servers apart
+            switch(alice, "survival", GameMode.SURVIVAL)
             alice.awaitWorld("minecraft:overworld")
-            switch(alice, "lobby", joins = 3)
-            assertEquals(GameMode.ADVENTURE, alice.gameMode)
+            switch(alice, "lobby", GameMode.ADVENTURE)
             // still alive and answering after two switches
             alice.moveTo(alice.position + Vec3(0.0, 0.1, 0.0), onGround = false)
         }
     }
 
-    /** `/server <name>` (Velocity), retried while the target server is still starting. */
-    private fun switch(bot: Bot, server: String, joins: Int, wait: Duration = 180.seconds) {
+    /**
+     * `/server <name>` (Velocity) until the bot is on that server, recognised by [gameMode]. Retried
+     * while the target server is still starting: Velocity then refuses the switch, or the new server
+     * drops the player and Velocity's failover sends it back to the lobby (another login, but with the
+     * lobby's game mode, so counting logins alone is not enough).
+     */
+    private fun switch(bot: Bot, server: String, gameMode: GameMode, wait: Duration = 180.seconds) {
         val end = System.nanoTime() + wait.inWholeNanoseconds
         while (true) {
+            val joins = bot.joins
             bot.command("server $server")
             try {
-                bot.awaitJoins(joins, 20.seconds)
-                return
+                bot.awaitJoins(joins + 1, 20.seconds)
+                if (bot.gameMode == gameMode) return
+                println("[${bot.name}] switch to $server landed in ${bot.gameMode} (failover?), retrying")
             } catch (e: BotException) {
-                if (!bot.connected || System.nanoTime() > end) throw e
+                if (!bot.connected) throw e
                 println("[${bot.name}] switch to $server not done yet: ${bot.messages().lastOrNull()?.text}")
             }
+            if (System.nanoTime() > end) error("[${bot.name}] could not switch to $server within $wait")
         }
     }
 }
