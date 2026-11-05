@@ -79,6 +79,7 @@ class OutboxModelTest {
         }.also { it.freeze(); open += it }
 
         val calls = Collections.synchronizedList(ArrayList<Call>())
+        val run = "k-${UUID.randomUUID()}-"
         val process = ecs.outbox.process(UUID.randomUUID(), "model", "test")
         fun endpoint(name: String, vararg caps: Capability<ModelJob>): Outbox.Endpoint {
             val id = UUID.randomUUID()
@@ -86,6 +87,8 @@ class OutboxModelTest {
             return process.endpoint(id, name) {
                 for (cap in caps) {
                     handles(cap) { job ->
+                        // entries an earlier run left behind (same capabilities, same database)
+                        if (!job.key.startsWith(run)) return@handles
                         val ok = synchronized(r) { r.nextInt(3) != 0 }
                         calls += Call(job.key, EntityId.of(id), cap.name, Instant.now(), ok)
                         if (!ok) error("handler fails")
@@ -108,7 +111,7 @@ class OutboxModelTest {
                 val cap = if (r.nextBoolean()) ModelCapA else ModelCapB
                 val target = if (r.nextInt(3) == 0) endpoints.filter { cap.name in handles.getValue(it.id) }.random(r).id else null
                 val notBefore = if (r.nextInt(5) == 0) Instant.now().plusMillis(r.nextLong(50, 300)) else null
-                Triple("k-${UUID.randomUUID()}", cap, target to notBefore)
+                Triple("$run${UUID.randomUUID()}", cap, target to notBefore)
             }
             try {
                 val entries = ecs.tx {
