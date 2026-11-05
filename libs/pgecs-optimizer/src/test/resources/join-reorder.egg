@@ -1,0 +1,40 @@
+; Query-shaped workload from the egglog-on-Endive spike: a 4-way join with filters and a
+; projection (~15 e-nodes), join reordering + filter pushdown, cost-based extraction.
+(datatype Pred
+  (EqCols String String String String)   ; t1.c1 = t2.c2
+  (EqConst String String i64)            ; t.c = const
+  (And Pred Pred))
+(datatype Rel
+  (Scan String :cost 10)
+  (FScan Pred String :cost 2)            ; scan with pushed-down predicate
+  (Filter Pred Rel :cost 20)
+  (Join Pred Rel Rel :cost 5)
+  (Project String Rel :cost 1))
+
+(relation has (Rel String))
+(rule ((= r (Scan t))) ((has r t)))
+(rule ((= r (FScan p t))) ((has r t)))
+(rule ((= r (Join p a b)) (has a t)) ((has r t)))
+(rule ((= r (Join p a b)) (has b t)) ((has r t)))
+(rule ((= r (Filter p a)) (has a t)) ((has r t)))
+
+; join commutativity / associativity
+(rewrite (Join p a b) (Join p b a))
+(rewrite (Join p1 (Join p2 a b) c) (Join p2 a (Join p1 b c)))
+; split conjunctive filters
+(rewrite (Filter (And p q) r) (Filter p (Filter q r)))
+; push a single-table filter into the join side that has the table
+(rule ((= f (Filter (EqConst t c v) (Join q a b))) (has a t))
+      ((union f (Join q (Filter (EqConst t c v) a) b))))
+; fuse filter into scan
+(rewrite (Filter p (Scan t)) (FScan p t))
+
+(let q
+  (Project "orders.id"
+    (Filter (And (EqConst "customer" "region" 3) (EqConst "item" "kind" 7))
+      (Join (EqCols "orders" "id" "lineitem" "order_id")
+        (Join (EqCols "orders" "customer_id" "customer" "id") (Scan "orders") (Scan "customer"))
+        (Join (EqCols "lineitem" "item_id" "item" "id") (Scan "lineitem") (Scan "item"))))))
+
+(run-schedule (saturate (run)))
+(extract q)
