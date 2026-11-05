@@ -1,9 +1,14 @@
-# Main Velocity proxy of the local compose network. Players reach it only through the edge proxies
-# (deploy/edge), which prepend a PROXY protocol v2 header with the player's real address.
+# Edge Velocity proxy (template): every edge renders its own copy (deploy/build.gradle.kts,
+# stageEdges) and connects straight to the Fabric servers; there is no main Velocity.
+# Design: https://claude.ai/artifact/WDswfCSv1YSxbGT7HWgtzd
+#
+# The EDGE and HAPROXY_PROTOCOL placeholders (between @) are filled in per edge. haproxy-protocol is on only for an edge behind
+# an L4 (DDoS) filter that sends PROXY protocol v2; such an edge must accept connections only from the
+# filter, since anyone else could forge the header.
 config-version = "2.7"
 
 bind = "0.0.0.0:25565"
-motd = "<gold>168blocks</gold>"
+motd = "<gold>168blocks</gold> <gray>@EDGE@</gray>"
 show-max-players = 500
 # Local network: offline mode so end-to-end test bots can join without Mojang accounts.
 online-mode = false
@@ -17,9 +22,10 @@ ping-passthrough = "disabled"
 sample-players-in-ping = false
 enable-player-address-logging = true
 
+# Fabric servers on distinct ports (in production on the core host, through the WireGuard tunnel)
 [servers]
-lobby = "lobby:25565"
-survival = "survival:25565"
+lobby = "lobby:25601"
+survival = "survival:25602"
 try = ["lobby"]
 
 [forced-hosts]
@@ -30,7 +36,7 @@ compression-level = -1
 login-ratelimit = 0
 connection-timeout = 5000
 read-timeout = 30000
-haproxy-protocol = true
+haproxy-protocol = @HAPROXY_PROTOCOL@
 tcp-fast-open = false
 bungee-plugin-message-channel = true
 show-ping-requests = false
