@@ -41,7 +41,6 @@ class MatrixStore(private val ecs: PgEcs, private val config: PgEcsConfig, val s
         require(url.startsWith("postgresql://")) { "expected a jdbc:postgresql:// URL, got ${config.jdbcUrl}" }
         val options = ConnectionFactoryOptions.parse("r2dbc:$url").mutate()
             .option(ConnectionFactoryOptions.USER, config.user)
-            .option(ConnectionFactoryOptions.PASSWORD, config.password)
             .option(Option.valueOf("schema"), schema)
             .build()
         return R2dbcDatabase.connect(databaseConfig = R2dbcDatabaseConfig.Builder().apply { connectionFactoryOptions = options })

@@ -9,7 +9,7 @@ import java.io.File
 
 /**
  * Environment:
- * - `PGECS_URL`, `PGECS_USER`, `PGECS_PASSWORD`: database (see [PgEcsConfig.fromEnv])
+ * - `PGECS_URL`, `PGECS_USER`: database, no password (see [PgEcsConfig])
  * - `BLOCKS_HTTP_PORT`: listen port, default 8080
  * - `BLOCKS_FRONTEND_DIR`: built web frontend to serve at `/` (optional)
  * - `BLOCKS_MATRIX_*`: Matrix bot, off unless `BLOCKS_MATRIX_HOMESERVER` is set (see [MatrixBotConfig])

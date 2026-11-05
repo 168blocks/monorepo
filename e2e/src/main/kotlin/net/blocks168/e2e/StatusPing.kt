@@ -8,11 +8,7 @@ import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
-import java.io.EOFException
-import java.io.InputStream
-import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
 
@@ -79,50 +75,4 @@ object StatusPing {
         is kotlinx.serialization.json.JsonArray -> component.joinToString("") { plainText(it) }
         else -> component.jsonPrimitive.contentOrNull ?: ""
     }
-}
-
-// --- protocol primitives (shared with the future protocol-level bot client) ---
-
-internal class PacketWriter {
-    val bytes = ByteArrayOutputStream()
-    fun writeVarInt(value: Int) {
-        var v = value
-        while (true) {
-            if (v and 0x7f.inv() == 0) { bytes.write(v); return }
-            bytes.write((v and 0x7f) or 0x80)
-            v = v ushr 7
-        }
-    }
-    fun writeString(s: String) {
-        val b = s.toByteArray(Charsets.UTF_8)
-        writeVarInt(b.size)
-        bytes.write(b)
-    }
-    fun writeShort(v: Int) {
-        bytes.write((v shr 8) and 0xff)
-        bytes.write(v and 0xff)
-    }
-}
-
-internal fun OutputStream.writePacket(id: Int, body: PacketWriter.() -> Unit) {
-    val payload = PacketWriter().apply { writeVarInt(id); body() }.bytes.toByteArray()
-    val frame = PacketWriter().apply { writeVarInt(payload.size) }.bytes.toByteArray()
-    write(frame)
-    write(payload)
-}
-
-internal fun InputStream.readVarInt(): Int {
-    var result = 0
-    for (i in 0 until 5) {
-        val b = read()
-        if (b < 0) throw EOFException()
-        result = result or ((b and 0x7f) shl (7 * i))
-        if (b and 0x80 == 0) return result
-    }
-    error("VarInt too long")
-}
-
-internal fun DataInputStream.readString(): String {
-    val len = readVarInt()
-    return String(ByteArray(len).also(::readFully), Charsets.UTF_8)
 }
