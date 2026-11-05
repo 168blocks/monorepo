@@ -186,13 +186,15 @@ in
     installPhase = "install -Dm644 -t $out libs/*/build/libs/*.jar";
   };
 
-  # the Fabric mods: example-common (servers and clients) and the dev-only e2e agent and client mods
+  # the Fabric mods: example-common (servers and clients), creative-host and the dev-only e2e agent and
+  # client mods
   mods = mkGradle {
     pname = "168blocks-mods";
     tasks = [
       ":mods:example-common:jar"
       ":mods:e2e-agent:jar"
       ":mods:e2e-client:jar"
+      ":mods:creative-host:jar"
     ];
     installPhase = "install -Dm644 -t $out mods/*/build/libs/*.jar";
   };
