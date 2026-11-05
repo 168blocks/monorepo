@@ -11,7 +11,7 @@ import net.blocks168.api.ApiJson
 import net.blocks168.api.ApiPaths
 import net.blocks168.api.Counter
 import net.blocks168.api.Health
-import net.blocks168.pgecs.PgEcs
+import net.blocks168.pgecs.db.Database
 import net.blocks168.pgecs.testing.TestPostgres
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -20,7 +20,7 @@ import kotlin.test.assertNotNull
 class BackendTest {
     @Test
     fun `counter persists in postgres`() {
-        PgEcs.connect(TestPostgres.config).use { ecs ->
+        Database.connect(TestPostgres.config).use { ecs ->
             val store = PgCounterStore(ecs).also { it.migrate() }
             testApplication {
                 application { backendModule(BackendServices(ecs, store)) }

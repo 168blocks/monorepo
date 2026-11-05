@@ -22,4 +22,5 @@ dependencies {
     }
     include(libs.tinyjcbor)
     include(libs.postgresql)
+    include(libs.hikaricp) // slf4j, coroutines and kotlinx.serialization come from Minecraft and fabric-language-kotlin
 }

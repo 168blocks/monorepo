@@ -54,9 +54,7 @@ scenario("second player sees the first in the lobby") {
   Packet ids are in `bot/PacketIds.kt`; a unit test checks them against the game's own report
   (`src/test/resources/packets-26.3.json`, from `java -DbundlerMainClass=net.minecraft.data.Main -jar
   server.jar --reports`). Formats come from the game's stream codecs (decompiled merged jar in the Loom
-  cache). `BotNetworkTest` joins through the edges, checks world and game mode, two bots meeting,
-  movement seen by another bot, chat, and `/server survival` and back. It needs the Minecraft servers
-  and is skipped unless `BLOCKS_ACCEPT_EULA=true`. The bot has no world model: it does not know the
+  cache). Its network tests are scenarios (`PlayerScenarioTest`, see "Scenario runner"). The bot has no world model: it does not know the
   terrain, so it can only make moves the caller knows are free.
 * Real game clients (`net.blocks168.e2e.client`, see "Game clients" below): `GameClientTest` starts a
   Minecraft 26.3 client, joins through edge 1, waits for the world and checks that its screenshots are
@@ -152,6 +150,47 @@ The database is checked directly through pgecs, the same way the services use it
   reset through the agent where needed.
 * `tools/network.sh test` brings the network up, waits until edges and backend answer, and runs the
   tests. CI does the same on a runner with podman and Nix.
+
+Implemented in `e2e/.../scenario/`:
+
+```kotlin
+@NetworkScenario   // @Test + @Tag("network") + ScenarioExtension
+fun `second player sees the first in the lobby`() = scenario {
+    val alice = bot("alice").connect(edge(1))          // fresh name, e.g. alice_k3x9q
+    alice.awaitWorld("minecraft:overworld")
+    val lobby = server("lobby")                         // ServerAgent, once it answers
+    lobby.assertOnline(alice)
+    proxy().assertOn(alice, "lobby")                    // ProxyAgent
+    val target = alice.position.copy(y = alice.position.y + 0.15)
+    alice.moveTo(target, onGround = false)
+    lobby.assertPosition(alice, target, tolerance = 0.01)
+    val bob = bot("bob").connect(edge(2))
+    bob.awaitSees(alice, target)
+}
+```
+
+* `scenario(timeout = 5.minutes) { }` runs the block in a coroutine scope on `Dispatchers.IO`:
+  `launch` / `async` let players act in parallel. The whole scenario has a timeout, and every await
+  has its own. It is skipped (not failed) without `BLOCKS_ACCEPT_EULA=true` unless
+  `needsServers = false`.
+* `bot(role)` gives a `ScenarioBot`: the protocol-level bot with suspending, cancellable actions
+  (`connect` retries while the servers start, `awaitWorld`, `awaitJoins`, `moveTo`/`moveBy`, `chat`,
+  `command`, `awaitChat`, `awaitSees`, `switchTo`). `server(name)` / `proxy()` are the agents;
+  `assertOnline(bot)`, `assertPosition(bot, …)`, `assertOn(bot, server)`, `send(bot, server)` take
+  bots, so tests never spell player names.
+* On failure the scenario writes a bundle to `e2e/build/scenario-diagnostics/<test>-<time>/`
+  (`BLOCKS_E2E_DIAGNOSTICS` overrides): the failure, a timeline of all steps and bot events, each
+  bot's log and state, snapshots of the agents it used, and `podman logs --tail 300` of every container
+  of the checkout's compose project (`BLOCKS_COMPOSE_PROJECT`). With `@NetworkScenario` the bundle is
+  also attached to the test in the JUnit / Gradle report.
+* `client(role)` starts a real game client (`ScenarioClient` on `GameClients`) with a fresh name:
+  `join(edge(n), dimension)`, `awaitSees(player)`, `awaitChat`, `chat`, `look`, `hud`, `screenshot`.
+  It skips the scenario where clients cannot run, and on failure attaches a last screenshot, its
+  screenshots and its log tail. `PlayerScenarioTest` has the README example with it.
+* Other kinds of players plug in the same way: a `ScenarioDriver` (closed at the end, asked for
+  diagnostics on failure) registered with `register(...)`.
+* `switchTo(server)` is done only when the proxy agent reports the bot on that server: a new login
+  alone can be Velocity's failover back to the lobby while the target still starts (#43).
 
 ### Next steps
 

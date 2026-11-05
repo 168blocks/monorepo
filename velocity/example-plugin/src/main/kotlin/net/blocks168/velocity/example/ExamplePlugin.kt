@@ -11,7 +11,7 @@ import com.velocitypowered.api.proxy.ProxyServer
 import com.velocitypowered.api.proxy.ServerConnection
 import com.velocitypowered.api.proxy.messages.MinecraftChannelIdentifier
 import net.blocks168.common.ServerHello
-import net.blocks168.pgecs.PgEcs
+import net.blocks168.pgecs.db.Database
 import net.blocks168.pgecs.PgEcsConfig
 import org.slf4j.Logger
 import java.util.concurrent.ConcurrentHashMap
@@ -27,7 +27,7 @@ class ExamplePlugin @Inject constructor(
     private val logger: Logger,
 ) {
     private val helloChannel = MinecraftChannelIdentifier.from(ServerHello.CHANNEL)
-    private var ecs: PgEcs? = null
+    private var ecs: Database? = null
 
     /** Last [ServerHello] per backend server name */
     val hellos = ConcurrentHashMap<String, ServerHello>()
@@ -36,7 +36,7 @@ class ExamplePlugin @Inject constructor(
     fun onInit(event: ProxyInitializeEvent) {
         proxy.channelRegistrar.register(helloChannel)
         if (System.getenv("PGECS_URL") != null) {
-            ecs = runCatching { PgEcs.connectWithRetry(PgEcsConfig.fromEnv()) }
+            ecs = runCatching { Database.connectWithRetry(PgEcsConfig.fromEnv().copy(applicationName = "velocity")) }
                 .onSuccess { logger.info("pgecs connected: {}", it.ping()) }
                 .onFailure { logger.error("pgecs connection failed", it) }
                 .getOrNull()
