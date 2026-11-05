@@ -9,6 +9,7 @@ fun Expr.children(): List<Expr> = when (this) {
     is Expr.Not -> listOf(operand)
     is Expr.IsNull -> listOf(operand)
     is Expr.Coalesce -> operands
+    is Expr.If -> listOf(condition, then, otherwise)
     is Expr.Arith -> listOf(left, right)
     is Expr.Negate -> listOf(operand)
     is Expr.Call -> args
@@ -38,6 +39,7 @@ fun Expr.transform(f: (Expr) -> Expr): Expr {
         is Expr.Not -> Expr.Not(operand.transform(f))
         is Expr.IsNull -> Expr.IsNull(operand.transform(f))
         is Expr.Coalesce -> Expr.Coalesce(operands.map { it.transform(f) })
+        is Expr.If -> Expr.If(condition.transform(f), then.transform(f), otherwise.transform(f))
         is Expr.Arith -> Expr.Arith(op, left.transform(f), right.transform(f))
         is Expr.Negate -> Expr.Negate(operand.transform(f))
         is Expr.Call -> Expr.Call(fn, args.map { it.transform(f) }, type)

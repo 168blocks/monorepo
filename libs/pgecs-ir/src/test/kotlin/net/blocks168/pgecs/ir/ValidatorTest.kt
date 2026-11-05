@@ -237,4 +237,22 @@ class ValidatorTest {
         match(EntityVar(7, "b"), CHILD_OF, target = a)
         select(a)
     }
+
+    @Test
+    fun `concatenation of a nullable value`() = invalid("may be null") {
+        val a = entity("a")
+        val m = entity("m")
+        val v = value("v", ValueType.JSON)
+        match(a, ACCOUNT)
+        optional { match(m, CHILD_OF, target = a); match(m, EMAIL, value = v) }
+        select("s", Functions.call(Functions.CONCAT, Expr.Literal.of("x"), field(v, "address")))
+    }
+
+    @Test
+    fun `if needs a boolean that cannot be null`() = invalid("boolean may be null") {
+        val a = entity("a")
+        val v = value("v", ValueType.JSON)
+        match(a, EMAIL, value = v)
+        select("s", Expr.If(field(v, "ok", type = ValueType.BOOL.asNullable()), Expr.Literal.of(1), Expr.Literal.of(2)))
+    }
 }

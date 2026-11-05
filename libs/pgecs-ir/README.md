@@ -22,7 +22,7 @@ A query is a term graph: **variables** are nodes, **terms** are edges, plus what
 | `Term.Match(subject, component, target?, value?)` | Flecs' term: `subject` has `component` (a pair with `target`), optionally binding its value. Joins happen by sharing variables. |
 | `Term.Filter(expr)` | A boolean condition over visible variables. |
 | `Term.Optional(terms)` | Flecs' `?`, generalised to a group: a left join. Variables first bound inside are null outside when it does not match. |
-| `Expr` | Typed value expressions: `Var`, `Field` (JSON path into a value), `Param`, `Literal`, `Compare`, `And`/`Or`/`Not`, `IsNull`, `Coalesce`, `Arith`, `Negate`, `Call`, `Exists`, `Aggregate`, and `Arg` (an un-attached lambda argument). |
+| `Expr` | Typed value expressions: `Var`, `Field` (JSON path into a value), `Param`, `Literal`, `Compare`, `And`/`Or`/`Not`, `IsNull`, `Coalesce` (`?:`), `If` (if/else as an expression), `Arith`, `Negate`, `Call`, `Exists`, `Aggregate`, and `Arg` (an un-attached lambda argument). |
 | `ComponentRef` | A registered type as the IR needs it: name, kind (tag, value, relation, capability), value type and owning source. |
 | `EntityRef` | Subject or target of a match: a variable, `AnyEntity` (`*`), a `TypeEntity` (a capability's entity) or a UUID parameter. |
 | `QueryIr` | Variables, parameter types, terms, `select` (named projections), `distinct`, `groupBy`, `orderBy`, `limit`, `offset`, `lock`. |
@@ -63,7 +63,7 @@ design doc.
   inside an `Exists` are local to it. Variables bound only inside an `Optional` are visible outside
   but may be null (`Nullability.optionalVariables`).
 * **Functions.** `Functions` lists the built-ins every source must understand (`pgecs:lowercase`,
-  `uppercase`, `trim`, `length`, `startsWith`, `endsWith`, `contains`, `now`). Sources add their own
+  `uppercase`, `trim`, `length`, `startsWith`, `endsWith`, `contains`, `concat`, `now`; `concat` rejects arguments that may be null, since Kotlin would print `"null"`). Sources add their own
   under their namespace (`mc:near`). `now()` is one instant per execution, never a constant in a plan.
 
 ## Shapes and the plan cache

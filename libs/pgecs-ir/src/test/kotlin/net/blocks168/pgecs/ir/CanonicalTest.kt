@@ -64,9 +64,11 @@ class CanonicalTest {
             ),
         )
         groupBy(Expr.Var(acc))
+        groupBy(Expr.If(Expr.IsNull(Expr.Var(acc)), Expr.Literal.of("none"), Functions.call(Functions.CONCAT, Expr.Literal.of("acc-"), Expr.Literal.of("x"))))
         select(acc)
         select("n", Expr.Aggregate(AggregateFn.COUNT, Expr.Var(mail), distinct = true))
         select("all", Expr.Aggregate(AggregateFn.COUNT, null))
+        select("label", Expr.If(Expr.IsNull(Expr.Var(acc)), Expr.Literal.of("none"), Functions.call(Functions.CONCAT, Expr.Literal.of("acc-"), Expr.Literal.of("x"))))
         select("latest", Expr.Coalesce(listOf(Expr.Aggregate(AggregateFn.MAX, Expr.Var(exp)), Expr.Literal.of(Instant.EPOCH))))
         orderBy(SortKey(Expr.Aggregate(AggregateFn.COUNT, null), descending = true, nulls = NullOrder.FIRST))
         orderBy(Expr.Var(acc))

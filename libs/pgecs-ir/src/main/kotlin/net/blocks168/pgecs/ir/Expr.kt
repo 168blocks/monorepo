@@ -177,6 +177,21 @@ sealed interface Expr {
      * Kotlin; [ValueType.Kind.INSTANT] ± [ValueType.Kind.DURATION] and differences of instants are
      * allowed. See [Types.arith] for the rules.
      */
+    /**
+     * Kotlin `if (condition) then else otherwise` as an expression (SQL `case when`). Both branches
+     * have the same kind; the result is nullable if either branch is.
+     */
+    data class If(val condition: Expr, val then: Expr, val otherwise: Expr) : Expr {
+        init {
+            require(condition.type.kind == ValueType.Kind.BOOL) { "if condition is ${condition.type}, expected bool" }
+            require(then.type.kind == otherwise.type.kind) { "if branches differ: ${then.type} and ${otherwise.type}" }
+        }
+
+        override val type: ValueType get() = then.type.copy(nullable = then.type.nullable || otherwise.type.nullable)
+
+        override fun toString(): String = "(if $condition then $then else $otherwise)"
+    }
+
     data class Arith(val op: ArithOp, val left: Expr, val right: Expr) : Expr {
         override val type: ValueType = Types.arith(op, left.type, right.type)
             ?: throw IllegalArgumentException("cannot apply ${op.symbol} to ${left.type} and ${right.type}")

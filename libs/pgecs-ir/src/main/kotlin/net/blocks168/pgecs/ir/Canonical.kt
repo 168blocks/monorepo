@@ -186,6 +186,7 @@ object Canonical {
             is Expr.Not -> list("not", listOf(e.operand))
             is Expr.IsNull -> list("is-null", listOf(e.operand))
             is Expr.Coalesce -> list("coalesce", e.operands)
+            is Expr.If -> list("if", listOf(e.condition, e.then, e.otherwise))
             is Expr.Arith -> list(e.op.name.lowercase(), listOf(e.left, e.right))
             is Expr.Negate -> list("negate", listOf(e.operand))
             is Expr.Call -> {

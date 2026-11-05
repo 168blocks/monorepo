@@ -252,6 +252,7 @@ internal class CanonicalParser private constructor(private val text: String) {
                 "not" -> Expr.Not(expr(p.single()))
                 "is-null" -> Expr.IsNull(expr(p.single()))
                 "coalesce" -> Expr.Coalesce(p.map(::expr))
+                "if" -> if (p.size == 3) Expr.If(expr(p[0]), expr(p[1]), expr(p[2])) else fail("bad if $n")
                 "negate" -> Expr.Negate(expr(p.single()))
                 "call" -> Expr.Call(FunctionId(p[0].atom()), p.drop(2).map(::expr), type(p[1]))
                 "exists" -> Expr.Exists(p.map(::term))

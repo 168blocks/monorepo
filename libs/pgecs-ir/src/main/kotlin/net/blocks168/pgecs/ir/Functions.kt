@@ -49,6 +49,12 @@ object Functions {
     @JvmField val CONTAINS = FunctionId("pgecs:contains")
 
     /**
+     * String concatenation, `a + b` / string templates on non-null strings. Not null-propagating:
+     * Kotlin prints a null as `"null"`, so validation rejects arguments that may be null.
+     */
+    @JvmField val CONCAT = FunctionId("pgecs:concat")
+
+    /**
      * `now()`: the time a query executes, bound at every execution, never cached in a plan. One
      * value per execution, so every `now()` in a query sees the same instant.
      */
@@ -62,6 +68,7 @@ object Functions {
         STARTS_WITH to Signature(listOf(Kind.TEXT, Kind.TEXT), ValueType.BOOL),
         ENDS_WITH to Signature(listOf(Kind.TEXT, Kind.TEXT), ValueType.BOOL),
         CONTAINS to Signature(listOf(Kind.TEXT, Kind.TEXT), ValueType.BOOL),
+        CONCAT to Signature(listOf(Kind.TEXT, Kind.TEXT), ValueType.TEXT),
         NOW to Signature(emptyList(), ValueType.INSTANT),
     )
 
@@ -83,6 +90,7 @@ object Functions {
     fun call(fn: FunctionId, vararg args: Expr): Expr.Call {
         val sig = requireNotNull(signatures[fn]) { "$fn is not a built-in function" }
         require(args.size == sig.params.size) { "$fn takes ${sig.params.size} arguments, got ${args.size}" }
+        require(fn != CONCAT || args.none { it.type.nullable }) { "$fn of a nullable string; Kotlin would print \"null\"" }
         val nullable = args.any { it.type.nullable }
         return Expr.Call(fn, args.asList(), if (nullable) sig.result.asNullable() else sig.result)
     }

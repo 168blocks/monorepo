@@ -32,6 +32,7 @@ object Nullability {
         is Expr.Arg -> e.type.nullable
         is Expr.Compare, is Expr.And, is Expr.Or, is Expr.Not, is Expr.IsNull, is Expr.Exists -> false
         is Expr.Coalesce -> e.operands.all { mayBeNull(it, nullVariables) }
+        is Expr.If -> mayBeNull(e.then, nullVariables) || mayBeNull(e.otherwise, nullVariables)
         is Expr.Arith -> mayBeNull(e.left, nullVariables) || mayBeNull(e.right, nullVariables)
         is Expr.Negate -> mayBeNull(e.operand, nullVariables)
         is Expr.Call -> e.type.nullable || e.args.any { mayBeNull(it, nullVariables) }
@@ -251,6 +252,10 @@ internal class Validator private constructor(private val q: QueryIr) {
                 e.operands.forEach(::sub)
                 if (e.operands.map { it.type.kind }.distinct().size > 1) problem("$where: ?: of different types: $e")
             }
+            is Expr.If -> {
+                sub(e.condition); sub(e.then); sub(e.otherwise)
+                requireBool(e.condition, visible, where)
+            }
             is Expr.Arith -> { sub(e.left); sub(e.right) }
             is Expr.Negate -> sub(e.operand)
             is Expr.Call -> {
@@ -261,6 +266,9 @@ internal class Validator private constructor(private val q: QueryIr) {
                         problem("$where: ${e.fn} takes ${sig.params}, got ${e.args.map { it.type }}")
                     }
                     if (e.type.asNonNull() != sig.result) problem("$where: ${e.fn} returns ${sig.result}, not ${e.type}")
+                    if (e.fn == Functions.CONCAT && e.args.any { mayBeNull(it, visible) }) {
+                        problem("$where: string concatenation of a value that may be null (Kotlin would print \"null\"): $e")
+                    }
                 }
             }
             is Expr.Exists -> checkScope(e.terms, visible, "exists in $where")
