@@ -105,6 +105,17 @@ services:
       - s3:/data
     depends_on: [core]
 
+  network-schema:
+    # the network plugin's tables (velocity/network NetworkSchema), created as the database owner; the
+    # edges (blocks_edge) cannot, and stay in maintenance until this ran
+    <<: *jvm
+    network_mode: service:core
+    restart: on-failure
+    command: ["java", "-cp", "network.jar", "dev.vxcc.b8.velocity.network.NetworkSchemaKt"]
+    environment: *core-env
+    volumes: ["./build/stage/network-schema:/srv:ro,Z"]
+    depends_on: [core, postgres]
+
   backend:
     <<: *jvm
     network_mode: service:core
@@ -173,6 +184,8 @@ services:
     <<: *edge
     environment:
       <<: *edge-env
+      BLOCKS_EDGE_NAME: edge-1
+      BLOCKS_EDGE_ADDRESS: 127.0.0.1:${BLOCKS_EDGE1_PORT:-25501}
       BLOCKS_E2E_AGENT_PORT: "8765" # velocity/e2e-agent (dev only), published for edge 1
     volumes: ["./build/stage/edge-1:/srv:Z", "./build/wireguard/edge-1:/etc/wireguard:ro,Z"]
     ports:
@@ -180,13 +193,21 @@ services:
       - "127.0.0.1:${BLOCKS_VELOCITY_AGENT_PORT:-28500}:8765"
   edge-2:
     <<: *edge
-    environment: *edge-env
+    environment:
+      <<: *edge-env
+      BLOCKS_EDGE_NAME: edge-2
+      # players' address of this edge (edge 3: its filter), where other edges transfer drained players
+      BLOCKS_EDGE_ADDRESS: 127.0.0.1:${BLOCKS_EDGE2_PORT:-25502}
     volumes: ["./build/stage/edge-2:/srv:Z", "./build/wireguard/edge-2:/etc/wireguard:ro,Z"]
     ports: ["127.0.0.1:${BLOCKS_EDGE2_PORT:-25502}:25565"]
   edge-3:
     # behind edge-3-filter (haproxy-protocol = true); not published itself
     <<: *edge
-    environment: *edge-env
+    environment:
+      <<: *edge-env
+      BLOCKS_EDGE_NAME: edge-3
+      # players' address of this edge (edge 3: its filter), where other edges transfer drained players
+      BLOCKS_EDGE_ADDRESS: 127.0.0.1:${BLOCKS_EDGE3_PORT:-25503}
     volumes: ["./build/stage/edge-3:/srv:Z", "./build/wireguard/edge-3:/etc/wireguard:ro,Z"]
   edge-3-filter:
     # stands in for an L4 DDoS filter: PROXY protocol v2 to edge 3
