@@ -371,6 +371,17 @@ private class Lowerer(private val ir: QueryIr, private val nullParams: Set<Int>)
         else -> l to r
     }
 
+    /**
+     * Operands that become one SQL value (`coalesce`, `case`): UUIDs from fields are text, entities
+     * are `uuid`, and SQL does not mix them, so mixed operands are all compared as text.
+     */
+    private fun unifyAll(xs: List<Expr>): List<Expr> =
+        if (xs.any { it.kind == Kind.STRING } && xs.any { it.kind == Kind.ENTITY }) {
+            xs.map { if (it.kind == Kind.ENTITY) Expr.Cast(it, Kind.STRING) else it }
+        } else {
+            xs
+        }
+
     private fun exists(terms: List<Term>, scope: Scope): Pred {
         val child = Scope(scope)
         val b = block(terms, child, nextBlock++)
@@ -392,7 +403,7 @@ private class Lowerer(private val ir: QueryIr, private val nullParams: Set<Int>)
         is IrExpr.Literal -> Expr.Const(literal(e.value), Lowering.kindOf(e.type))
         is IrExpr.Compare, is IrExpr.And, is IrExpr.Or, is IrExpr.Not, is IrExpr.IsNull, is IrExpr.Exists ->
             Expr.Bool(pred(e, scope, positive = true))
-        is IrExpr.Coalesce -> e.operands.map { expr(it, scope) }.let { args ->
+        is IrExpr.Coalesce -> unifyAll(e.operands.map { expr(it, scope) }).let { args ->
             Expr.Call(Fn.COALESCE, args, args.last().kind)
         }
         is IrExpr.Arith -> Expr.Arith(
@@ -412,8 +423,11 @@ private class Lowerer(private val ir: QueryIr, private val nullParams: Set<Int>)
             Expr.Arith(ArithOp.SUB, Expr.Const(if (k == Kind.DOUBLE) 0.0 else 0L, k), expr(e.operand, scope), k)
         }
         is IrExpr.Call -> if (e.fn == Functions.IN) Expr.Bool(pred(e, scope, positive = true)) else call(e, scope)
-        is IrExpr.If -> Expr.If(pred(e.condition, scope, positive = true), expr(e.then, scope), expr(e.otherwise, scope), Lowering.kindOf(e.type))
-        is IrExpr.Aggregate -> Expr.Aggregate(
+        is IrExpr.If -> {
+            val (t, o) = unifyAll(listOf(expr(e.then, scope), expr(e.otherwise, scope)))
+            Expr.If(pred(e.condition, scope, positive = true), t, o, t.kind)
+        }
+        is IrExpr.Aggregate -> e.arg?.let { expr(it, scope) }.let { arg -> Expr.Aggregate(
             when (e.fn) {
                 AggregateFn.COUNT -> AggFn.COUNT
                 AggregateFn.SUM -> AggFn.SUM
@@ -421,10 +435,11 @@ private class Lowerer(private val ir: QueryIr, private val nullParams: Set<Int>)
                 AggregateFn.MAX -> AggFn.MAX
                 AggregateFn.AVG -> AggFn.AVG
             },
-            e.arg?.let { expr(it, scope) },
+            arg,
             e.distinct,
-            Lowering.kindOf(e.type).let { if (e.arg is IrExpr.Field && e.arg!!.type.kind == ValueType.Kind.UUID) Kind.STRING else it },
-        )
+            // min/max of a UUID read from a field (text) is text
+            Lowering.kindOf(e.type).let { if (it == Kind.ENTITY && arg?.kind == Kind.STRING) Kind.STRING else it },
+        ) }
         is IrExpr.Arg -> error("lambda argument ${e.index} was never substituted")
     }
 
