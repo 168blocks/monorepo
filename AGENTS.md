@@ -106,7 +106,7 @@ Do not hard-code ports, container or project names in new scripts or tests: take
 | `backend/` | Ktor backend; serves the API and the web frontend |
 | `frontend/` | Compose Multiplatform frontend: web (Kotlin/Wasm) and desktop |
 | `mods/<name>` | Fabric mods (Minecraft 26.3, Loom without remapping, fabric-language-kotlin). `mods/example-common`: server + client; `mods/e2e-client`: dev-only client RPC for e2e tests |
-| `velocity/<name>` | Velocity plugins (Kotlin, fat jar via `pluginJar`) |
+| `velocity/<name>` | Velocity plugins (Kotlin, fat jar via `pluginJar`); `velocity/network`: every edge (online players, cross-edge actions, drain, maintenance) |
 | `deploy/` | podman compose network (`compose.yaml`, WireGuard peers in `wireguard/peers.toml`) and the Gradle tasks that stage it (`:deploy:stage`, `:deploy:wireguard`) |
 | `e2e/` | End-to-end tests against the running network |
 | `docs/` | `architecture.md`, `testing.md`, `pgecs.md` (pgecs design) |

@@ -14,6 +14,8 @@ object PacketIds {
     object Handshake {
         const val INTENTION = 0x00
         const val INTENT_LOGIN = 2
+        /** login after a transfer packet (the server must accept transfers) */
+        const val INTENT_TRANSFER = 3
     }
 
     object Login {
@@ -39,6 +41,7 @@ object PacketIds {
         const val KEEP_ALIVE = 4
         const val PING = 5
         const val RESOURCE_PACK_PUSH = 9
+        const val TRANSFER = 12
         const val SELECT_KNOWN_PACKS = 15
         const val CODE_OF_CONDUCT = 20
         // serverbound
@@ -73,6 +76,7 @@ object PacketIds {
         const val START_CONFIGURATION = 120
         const val SYSTEM_CHAT = 124
         const val TELEPORT_ENTITY = 128
+        const val TRANSFER = 132
         // serverbound
         const val S_ACCEPT_TELEPORTATION = 0
         const val S_CHAT_COMMAND = 7

@@ -78,7 +78,10 @@ class TunnelTest {
         }
     }
 
-    /** Check 5: with its peer removed from the hub, an edge refuses logins; restored, it lets players in again. */
+    /**
+     * Check 5: with its peer removed from the hub, an edge answers pings with "maintenance" and refuses
+     * logins; restored, it lets players in again.
+     */
     @Test
     fun removedPeerRefusesLogins() {
         val c = compose()
@@ -97,6 +100,12 @@ class TunnelTest {
         val removed = c.exec("core", "wg", "set", "wg0", "peer", key, "remove")
         assertTrue(removed.ok, removed.output)
         try {
+            // the edge loses the database with its tunnel: maintenance in pings, logins refused
+            val end = System.nanoTime() + 30.seconds.inWholeNanoseconds
+            while (!StatusPing.ping(edge.host, edge.port).description.contains("maintenance")) {
+                assertTrue(System.nanoTime() < end, "edge 2 does not report maintenance without its tunnel")
+                Thread.sleep(1000)
+            }
             val revoked = login()
             assertTrue(revoked.isFailure, "edge 2 let a player in without its tunnel")
             println("edge 2 without its peer: ${revoked.exceptionOrNull()?.message}")

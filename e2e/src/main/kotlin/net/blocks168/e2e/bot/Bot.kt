@@ -69,6 +69,10 @@ class Bot(
     /** teleports received from the server (initial placement, corrections, server switches) */
     var teleports = 0; private set
     var disconnectReason: String? = null; private set
+    /** where the last transfer packet sent the bot ([followTransfer] connects there), null otherwise */
+    var transfer: Network.Endpoint? = null; private set
+    /** the last transfer this bot followed, `host:port` */
+    var lastTransfer: String? = null; private set
     private val entities = HashMap<Int, Pair<UUID, Vec3>>()
     private val chat = ArrayList<ChatMessage>()
     private var loadedSent = false
@@ -86,8 +90,20 @@ class Bot(
 
     fun connect(endpoint: Network.Endpoint, timeout: Duration = 30.seconds): Bot = connect(endpoint.host, endpoint.port, timeout)
 
+    /**
+     * Waits until the server transfers the bot (transfer packet), then logs in where it was sent, as a
+     * transfer (handshake intent 3), like the game client does on its own.
+     */
+    fun followTransfer(timeout: Duration = 30.seconds): Bot {
+        await("transfer", timeout, allowDisconnected = true) { transfer != null }
+        val to = transfer!!
+        reader?.takeIf { it != Thread.currentThread() }?.join(2000)
+        lastTransfer = to.toString()
+        return connect(to.host, to.port, timeout, transferred = true)
+    }
+
     /** Connects, logs in and returns once the bot is in the world and placed (first teleport). */
-    fun connect(host: String, port: Int, timeout: Duration = 30.seconds): Bot {
+    fun connect(host: String, port: Int, timeout: Duration = 30.seconds, transferred: Boolean = false): Bot {
         check(phase == Phase.DISCONNECTED) { "$name is already connected" }
         val s = Socket()
         s.tcpNoDelay = true
@@ -97,6 +113,7 @@ class Bot(
             socket = s; conn = c
             phase = Phase.LOGIN
             disconnectReason = null
+            transfer = null
             joins = 0; teleports = 0; pos = null; dimension = null
             entities.clear()
         }
@@ -104,7 +121,7 @@ class Bot(
             writeVarInt(PacketIds.PROTOCOL_VERSION)
             writeString(host)
             writeShort(port)
-            writeVarInt(PacketIds.Handshake.INTENT_LOGIN)
+            writeVarInt(if (transferred) PacketIds.Handshake.INTENT_TRANSFER else PacketIds.Handshake.INTENT_LOGIN)
         }
         c.send(L.S_HELLO) { writeString(name); writeUuid(uuid) }
         reader = Thread({ readLoop(c) }, "bot-$name").apply { isDaemon = true; start() }
@@ -121,11 +138,11 @@ class Bot(
     // --- awaiting ---
 
     /** Waits until [condition] (evaluated under the state lock) holds; fails early on disconnect. */
-    fun await(what: String, timeout: Duration = 10.seconds, condition: Bot.() -> Boolean) {
+    fun await(what: String, timeout: Duration = 10.seconds, allowDisconnected: Boolean = false, condition: Bot.() -> Boolean) {
         val end = System.nanoTime() + timeout.inWholeNanoseconds
         synchronized(lock) {
             while (!condition()) {
-                if (phase == Phase.DISCONNECTED) throw BotException("$name disconnected while waiting for $what: $disconnectReason")
+                if (phase == Phase.DISCONNECTED && !allowDisconnected) throw BotException("$name disconnected while waiting for $what: $disconnectReason")
                 val left = (end - System.nanoTime()) / 1_000_000
                 if (left <= 0) throw BotException("$name: timeout after $timeout waiting for $what (dimension=$dimension, position=$pos, joins=$joins)")
                 lock.wait(left)
@@ -247,6 +264,15 @@ class Bot(
         }
     }
 
+    /** The server sends us elsewhere: leave (the reader ends), [followTransfer] connects there */
+    private fun transferred(host: String, port: Int) {
+        synchronized(lock) {
+            transfer = Network.Endpoint(host, port)
+            disconnectReason = "transferred to $host:$port"
+        }
+        throw EOFException()
+    }
+
     private fun kicked(reason: String) {
         synchronized(lock) { disconnectReason = "kicked: $reason" }
         throw EOFException()
@@ -276,6 +302,7 @@ class Bot(
         val r = p.body
         when (p.id) {
             C.DISCONNECT -> kicked(Nbt.readComponentText(r))
+            C.TRANSFER -> transferred(r.readString(), r.readVarInt())
             C.KEEP_ALIVE -> { val id = r.readLong(); c.send(C.S_KEEP_ALIVE) { writeLong(id) } }
             C.PING -> { val id = r.readInt(); c.send(C.S_PONG) { writeInt(id) } }
             C.COOKIE_REQUEST -> c.send(C.S_COOKIE_RESPONSE) { writeString(r.readString()); writeBoolean(false) }
@@ -301,6 +328,7 @@ class Bot(
             P.KEEP_ALIVE -> { val id = r.readLong(); c.send(P.S_KEEP_ALIVE) { writeLong(id) } }
             P.PING -> { val id = r.readInt(); c.send(P.S_PONG) { writeInt(id) } }
             P.DISCONNECT -> kicked(Nbt.readComponentText(r))
+            P.TRANSFER -> transferred(r.readString(), r.readVarInt())
             P.COOKIE_REQUEST -> c.send(P.S_COOKIE_RESPONSE) { writeString(r.readString()); writeBoolean(false) }
             P.RESOURCE_PACK_PUSH -> acceptResourcePack(c, r.readUuid(), P.S_RESOURCE_PACK)
             P.CHUNK_BATCH_FINISHED -> c.send(P.S_CHUNK_BATCH_RECEIVED) { writeFloat(20f) }

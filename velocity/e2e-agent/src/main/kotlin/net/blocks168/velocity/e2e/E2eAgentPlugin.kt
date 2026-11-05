@@ -18,6 +18,7 @@ import java.util.concurrent.TimeUnit
  *     GET  /servers   [{name, address, players}]
  *     GET  /players   [{uuid, name, server}]       server is null while not connected to a backend
  *     POST /send      {"player": "alice", "server": "survival"} -> {status, success, reason}
+ *     POST /command   {"command": "network drain"} -> {success}     as the console
  */
 class E2eAgentPlugin @Inject constructor(
     private val proxy: ProxyServer,
@@ -29,6 +30,7 @@ class E2eAgentPlugin @Inject constructor(
     data class ServerInfo(val name: String, val address: String, val players: Int)
     data class PlayerInfo(val uuid: String, val name: String, val server: String?)
     data class SendResult(val status: String, val success: Boolean, val reason: String?)
+    data class CommandResult(val success: Boolean)
 
     @Subscribe
     fun onInit(event: ProxyInitializeEvent) {
@@ -69,6 +71,10 @@ class E2eAgentPlugin @Inject constructor(
                 success = result.isSuccessful,
                 reason = result.reasonComponent.map { PlainTextComponentSerializer.plainText().serialize(it) }.orElse(null),
             )
+        }
+        http.post("/command") { body ->
+            val command = body.get("command")?.asString ?: throw IllegalArgumentException("missing \"command\"")
+            CommandResult(proxy.commandManager.executeAsync(proxy.consoleCommandSource, command.removePrefix("/")).get(30, TimeUnit.SECONDS))
         }
     }
 }

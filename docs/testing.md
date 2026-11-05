@@ -45,6 +45,11 @@ scenario("second player sees the first in the lobby") {
   address (as `blocks` it is rejected) and reaches the Fabric servers only through the tunnel; with its
   peer removed from the hub an edge refuses logins (a bot), and lets players in again once restored.
   Nothing reaches PostgreSQL through a host port.
+* `EdgeNetworkTest` (network plugin, `velocity/network`): a bot logs in through each edge; pings of
+  every edge show the network-wide player count; the same name on edge 2 kicks the edge-1 session (and
+  twice on one edge keeps the newest); `network drain` on edge 1 transfers a bot to another edge
+  (`Bot.followTransfer`) and edge 1 refuses logins until `network undrain`. `TunnelTest` also checks
+  the "maintenance" ping of an edge without its tunnel.
 * Server-side agents (see "Server-side assertions" below): `ServerAgent` / `ProxyAgent` in
   `e2e/.../agent/`; `AgentTest` checks that Velocity reports its servers and that both Fabric servers
   report their worlds and run commands (`list`). The Fabric server tests are skipped unless
@@ -138,6 +143,7 @@ command: never deploy them to production.
 | Velocity | `GET /servers` | `[{name, address, players}]` |
 | Velocity | `GET /players` | `[{uuid, name, server}]` (`server` null while not on a backend) |
 | Velocity | `POST /send {"player": "alice", "server": "survival"}` | `{status, success, reason}` |
+| Velocity | `POST /command {"command": "network drain"}` | `{success}` (as the proxy console) |
 
 Errors are `{"error": "..."}` with 400 (bad request), 404 (unknown player/server/path) or 500.
 `ServerAgent` adds `assertOnline`, `assertOffline`, `assertPosition`; `ProxyAgent` adds `assertOn`
