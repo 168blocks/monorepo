@@ -8,11 +8,14 @@
 #   blocks_ops   ops peers (admins, CI), from 10.168.2.0/24: read-only
 #   postgres     only over the Unix socket inside this container (podman exec), via peer auth
 #
-# BLOCKS_PG_CORE_NETS: space-separated addresses/CIDRs of the core network, or `samenet` (default: the
-# container's own subnets, i.e. the compose network).
+# BLOCKS_PG_CORE_NETS: space-separated CIDRs of the core network (default: localhost; in the compose
+# network the core services share the `core` container's network namespace and talk over localhost).
+# BLOCKS_PG_LISTEN: listen_addresses (default: localhost and the WireGuard hub address 10.168.0.1, never
+# `*`). Addresses other than localhost are waited for (the namespace owner brings up wg0) before start.
+# The edges' tunnel addresses reach PostgreSQL unchanged (no NAT), so pg_hba can tell them apart.
 # Design: https://claude.ai/artifact/WDswfCSv1YSxbGT7HWgtzd ("Postgres without passwords").
 set -euo pipefail
-: "${POSTGRES_DB:=blocks}" "${BLOCKS_PG_CORE_NETS:=samenet}"
+: "${POSTGRES_DB:=blocks}" "${BLOCKS_PG_CORE_NETS:=127.0.0.1/32 ::1/128}" "${BLOCKS_PG_LISTEN:=localhost,10.168.0.1}"
 export PGDATA=/var/lib/postgresql/data
 mkdir -p "$PGDATA" /run/postgresql
 chown -R postgres:postgres /var/lib/postgresql /run/postgresql
@@ -50,4 +53,13 @@ fi
 } > "$PGDATA/pg_hba.conf"
 chown postgres:postgres "$PGDATA/pg_hba.conf"
 
-exec su-exec postgres postgres -D "$PGDATA" -c listen_addresses='*' -k /run/postgresql
+# PostgreSQL starts without an address it cannot bind (as long as another one works): wait for them
+for addr in ${BLOCKS_PG_LISTEN//,/ }; do
+  case "$addr" in localhost | 127.0.0.1 | *:* | '*') continue ;; esac
+  for _ in $(seq 120); do
+    [[ $(</proc/net/fib_trie) == *"-- $addr"$'\n'* ]] && break
+    sleep 1
+  done
+done
+
+exec su-exec postgres postgres -D "$PGDATA" -c listen_addresses="$BLOCKS_PG_LISTEN" -k /run/postgresql

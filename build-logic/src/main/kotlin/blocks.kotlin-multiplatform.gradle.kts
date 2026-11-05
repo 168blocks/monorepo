@@ -51,3 +51,9 @@ for (p in setOf(project, rootProject)) {
         }
     }
 }
+
+// Both run yarn; run concurrently (first build with an empty ~/.kotlin/kotlin-npm-tooling, e.g. in the
+// Nix sandbox), the project install ends up without build/wasm/node_modules and webpack fails.
+rootProject.tasks.matching { it.name == "kotlinWasmNpmInstall" }.configureEach {
+    mustRunAfter(rootProject.tasks.matching { it.name == "kotlinWasmToolingSetup" })
+}

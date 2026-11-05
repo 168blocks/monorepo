@@ -2,7 +2,8 @@
 # stageEdges) and connects straight to the Fabric servers; there is no main Velocity.
 # Design: https://claude.ai/artifact/WDswfCSv1YSxbGT7HWgtzd
 #
-# The EDGE and HAPROXY_PROTOCOL placeholders (between @) are filled in per edge. haproxy-protocol is on only for an edge behind
+# The EDGE, HAPROXY_PROTOCOL and CORE (hub tunnel address, deploy/wireguard/peers.toml) placeholders
+# (between @) are filled in per edge. haproxy-protocol is on only for an edge behind
 # an L4 (DDoS) filter that sends PROXY protocol v2; such an edge must accept connections only from the
 # filter, since anyone else could forge the header.
 config-version = "2.7"
@@ -22,10 +23,10 @@ ping-passthrough = "disabled"
 sample-players-in-ping = false
 enable-player-address-logging = true
 
-# Fabric servers on distinct ports (in production on the core host, through the WireGuard tunnel)
+# Fabric servers on the core host, on distinct ports, reachable only through the WireGuard tunnel
 [servers]
-lobby = "lobby:25601"
-survival = "survival:25602"
+lobby = "@CORE@:25601"
+survival = "@CORE@:25602"
 try = ["lobby"]
 
 [forced-hosts]
