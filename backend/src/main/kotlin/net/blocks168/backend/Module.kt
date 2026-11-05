@@ -17,10 +17,10 @@ import net.blocks168.api.ApiJson
 import net.blocks168.api.ApiPaths
 import net.blocks168.api.Counter
 import net.blocks168.api.Health
-import net.blocks168.pgecs.PgEcs
+import net.blocks168.pgecs.db.Database
 import java.io.File
 
-class BackendServices(val ecs: PgEcs?, val counter: CounterStore)
+class BackendServices(val ecs: Database?, val counter: CounterStore)
 
 fun Application.backendModule(services: BackendServices, frontendDir: File? = null) {
     install(ContentNegotiation) { json(ApiJson) }
