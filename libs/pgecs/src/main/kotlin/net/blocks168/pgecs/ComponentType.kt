@@ -7,6 +7,7 @@ import net.blocks168.pgecs.ir.ComponentKind
 import net.blocks168.pgecs.ir.ComponentRef
 import net.blocks168.pgecs.ir.SourceId
 import net.blocks168.pgecs.ir.ValueType
+import net.blocks168.pgecs.lambda.QueryFunction
 import net.blocks168.pgecs.lambda.QueryPredicate
 import net.blocks168.pgecs.schema.Cleanup
 import net.blocks168.pgecs.schema.IndexSpec
@@ -79,8 +80,32 @@ open class Component<T> : ComponentType {
     private val declaredIndexes = mutableListOf<IndexSpec>()
     private val kotlinChecks = mutableListOf<Pair<String, QueryPredicate<T>>>()
 
-    /** Indexes declared with [index]; freeze builds them. */
-    val indexes: List<IndexSpec> get() = declaredIndexes.toList()
+    private val lambdaIndexes = mutableListOf<Triple<String?, Boolean, QueryFunction<T, *>>>()
+
+    /** Indexes declared with [index] and [unique]; freeze builds them. */
+    val indexes: List<IndexSpec> get() = declaredIndexes.toList() + lambdaIndexSpecs
+
+    private val lambdaIndexSpecs: List<IndexSpec> by lazy {
+        lambdaIndexes.map { (key, unique, f) ->
+            val sql = IndexExpressions.render(this, f)
+            val k = key ?: ((if (unique) "u_" else "i_") + IndexExpressions.digest(sql))
+            IndexSpec(k, listOf("($sql)"), unique = unique)
+        }
+    }
+
+    /**
+     * A unique index on [f] of the value, as in `unique { it.address.lowercase() }`: two entities can
+     * never hold values with equal [f], even under concurrency. [f] is decompiled and rendered exactly
+     * as the query compiler renders it, so `where { it.address.lowercase() == x.lowercase() }` uses it.
+     */
+    protected fun unique(key: String? = null, f: QueryFunction<T, *>) {
+        lambdaIndexes += Triple(key, true, f)
+    }
+
+    /** A (non-unique) index on [f] of the value, as in `index { it }` for range scans on an instant. */
+    protected fun index(key: String? = null, f: QueryFunction<T, *>) {
+        lambdaIndexes += Triple(key, false, f)
+    }
 
     /**
      * Declares a per-component index (partial on this component's rows). [IndexSpec.expressions] must
@@ -175,3 +200,19 @@ object ChildOf : ExclusiveRelation("pgecs:child-of", acyclic = true, onDeleteTar
 
 /** A value failed a Kotlin-side check of its component ([Component.validate]). */
 class ComponentValidationException(message: String) : IllegalArgumentException(message)
+
+/** Renders `index { }` / `unique { }` lambdas to SQL with the query compiler. */
+internal object IndexExpressions {
+    fun render(component: Component<*>, f: java.io.Serializable): String {
+        val ir = net.blocks168.pgecs.dsl.QueryBuilder.forIndex().valueFunction(component, f)
+        val plan = net.blocks168.pgecs.query.lower.Lowering.lower(ir).query
+        return try {
+            net.blocks168.pgecs.query.sql.SqlCompiler.rowExpression(plan)
+        } catch (e: IllegalArgumentException) {
+            throw net.blocks168.pgecs.dsl.QueryBuildException("${component.name}: ${e.message}", e)
+        }
+    }
+
+    fun digest(sql: String): String = java.security.MessageDigest.getInstance("SHA-256")
+        .digest(sql.toByteArray()).take(6).joinToString("") { "%02x".format(it) }
+}

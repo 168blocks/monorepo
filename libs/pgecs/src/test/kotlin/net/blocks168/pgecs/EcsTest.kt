@@ -12,7 +12,9 @@ import kotlin.test.assertTrue
 import kotlinx.serialization.Serializable
 import net.blocks168.pgecs.db.Database
 import net.blocks168.pgecs.dsl.QueryResultException
+import net.blocks168.pgecs.ir.parameterize
 import net.blocks168.pgecs.query.QueryEngineConfig
+import net.blocks168.pgecs.query.sql.Bind
 import net.blocks168.pgecs.schema.CoreComponents
 import net.blocks168.pgecs.schema.IndexSpec
 import net.blocks168.pgecs.serial.InstantAsEpochMillis
@@ -29,7 +31,7 @@ data class Score(val points: Long)
 
 object MailComponent : Component<Mail>("test:ecs:mail:v1") {
     init {
-        index(IndexSpec("address", listOf("(lower(value->>'address'))"), unique = true))
+        unique("address") { it.address.lowercase() }
         validate("no spaces") { !it.address.contains(' ') }
     }
 }
@@ -331,6 +333,33 @@ class EcsTest {
             while (second.engine.metrics().cachedPlans == 0L && System.nanoTime() < deadline) Thread.sleep(20)
             assertTrue(second.engine.metrics().cachedPlans > 0, "nothing pre-compiled")
         }
+    }
+
+    @Test
+    fun `unique lambdas render exactly what queries use`() {
+        assertEquals(listOf(IndexSpec("address", listOf("(lower(value->>'address'))"), unique = true)), MailComponent.indexes)
+        val addr = "Idx${UUID.randomUUID()}@x"
+        val plan = ecs.read {
+            val q = query {
+                val m by entity
+                m has MailComponent.where { it.address.lowercase() == addr.lowercase() }
+                select { m }
+            }
+            val bound = q.ir.parameterize(q.params)
+            val compiled = ecs.engine.compile(bound.shape).sql!!
+            connection.createStatement().use { it.execute("set local enable_seqscan = off") } // the test table is tiny
+            connection.prepareStatement("explain ${compiled.sql}").use { st ->
+                compiled.binds.forEachIndexed { i, b ->
+                    when (b) {
+                        is Bind.Param -> st.setObject(i + 1, bound.arguments[b.index])
+                        is Bind.Const -> st.setObject(i + 1, b.value)
+                        Bind.Now -> st.setLong(i + 1, 0)
+                    }
+                }
+                st.executeQuery().use { rs -> buildString { while (rs.next()) appendLine(rs.getString(1)) } }
+            }
+        }
+        assertTrue("ecs_" in plan && "address" in plan && "Index" in plan, plan)
     }
 
     @Test

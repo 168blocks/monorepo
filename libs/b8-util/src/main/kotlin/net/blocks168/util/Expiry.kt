@@ -6,7 +6,6 @@ import net.blocks168.pgecs.Component
 import net.blocks168.pgecs.Ecs
 import net.blocks168.pgecs.EntityId
 import net.blocks168.pgecs.dsl.QueryBuilder
-import net.blocks168.pgecs.schema.IndexSpec
 import net.blocks168.pgecs.serial.InstantAsEpochMillis
 
 /**
@@ -16,15 +15,14 @@ import net.blocks168.pgecs.serial.InstantAsEpochMillis
  */
 object ExpiresSlowComponent : Component<Instant>("b8:util:expires-slow:v1", InstantAsEpochMillis) {
     init {
-        // exactly what the compiler renders for `it < now()` on a scalar instant (SqlCompiler.fieldSql)
-        index(IndexSpec("at", listOf("((value #>> '{}')::bigint)", "entity")))
+        index("at") { it }
     }
 }
 
 /** Like [ExpiresSlowComponent], swept every few seconds, for short-lived entities. */
 object ExpiresFastComponent : Component<Instant>("b8:util:expires-fast:v1", InstantAsEpochMillis) {
     init {
-        index(IndexSpec("at", listOf("((value #>> '{}')::bigint)", "entity")))
+        index("at") { it }
     }
 }
 

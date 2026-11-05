@@ -67,6 +67,13 @@ class SqlCompiler(private val stats: Stats) {
     companion object {
         const val NIL = "'00000000-0000-0000-0000-000000000000'::uuid"
 
+        /**
+         * The SQL of [q]'s first select expression over one unqualified `ecs_component` row, with
+         * constants inlined: what registry freeze puts into `CREATE INDEX`, so that a query predicate
+         * on the same expression, rendered by [compile], uses the index.
+         */
+        fun rowExpression(q: LogicalQuery): String = Rendering(Stats.UNKNOWN, q, bare = true).rowExpression()
+
         fun quote(s: String): String = "'" + s.replace("'", "''") + "'"
 
         fun quoteIdent(s: String): String = "\"" + s.replace("\"", "\"\"") + "\""
@@ -81,7 +88,7 @@ class SqlCompiler(private val stats: Stats) {
          * - JSON: `value->'a'->'b'`, the whole value `value`
          */
         fun fieldSql(alias: String, path: List<Any>, kind: Kind): String {
-            val base = "$alias.value"
+            val base = if (alias.isEmpty()) "value" else "$alias.value"
             fun key(k: Any) = if (k is Int) "$k" else quote(k as String)
             if (kind == Kind.JSON) return base + path.joinToString("") { "->${key(it)}" }
             val text = if (path.isEmpty()) {
@@ -97,13 +104,32 @@ class SqlCompiler(private val stats: Stats) {
     }
 }
 
-/** One compilation: aliases, bind placeholders and the text. */
-private class Rendering(private val stats: Stats, private val q: LogicalQuery) {
+/**
+ * One compilation: aliases, bind placeholders and the text. [bare] renders expressions over one
+ * unqualified `ecs_component` row with constants inlined, as index expressions need.
+ */
+private class Rendering(private val stats: Stats, private val q: LogicalQuery, private val bare: Boolean = false) {
     private val binds = mutableListOf<Bind>()
     private var nextAlias = maxAlias(q) + 1
     private var nextProbe = 0
 
     private fun alias(a: Int) = "c$a"
+
+    private fun literal(v: Any, kind: Kind): String = when (kind) {
+        Kind.LONG, Kind.DOUBLE -> "($v)::${kind.sqlType}"
+        Kind.BOOLEAN -> "$v"
+        else -> SqlCompiler.quote(v.toString()) + "::" + kind.sqlType
+    }
+
+    /** The first select expression, over the query's single scan, for [SqlCompiler.rowExpression]. */
+    fun rowExpression(): String {
+        val e = q.select.firstOrNull()?.expr ?: throw IllegalArgumentException("nothing selected")
+        val text = expr(e)
+        if (binds.isNotEmpty()) {
+            throw IllegalArgumentException("an index expression cannot depend on parameters or the time: $text")
+        }
+        return text
+    }
 
     /** A placeholder that [finish] turns into `?`, so that text can be assembled in any order. */
     private fun bind(b: Bind): String {
@@ -361,12 +387,12 @@ private class Rendering(private val stats: Stats, private val q: LogicalQuery) {
     }
 
     private fun expr(e: Expr): String = when (e) {
-        is Expr.Col -> "${alias(e.alias)}.${e.column.sql}"
-        is Expr.Field -> SqlCompiler.fieldSql(alias(e.alias), e.path, e.kind)
+        is Expr.Col -> if (bare) e.column.sql else "${alias(e.alias)}.${e.column.sql}"
+        is Expr.Field -> SqlCompiler.fieldSql(if (bare) "" else alias(e.alias), e.path, e.kind)
         is Expr.Param -> bind(Bind.Param(e.index, e.kind, e.list)) + "::" + e.kind.sqlType + (if (e.list) "[]" else "")
         is Expr.Const -> when (val v = e.value) {
             null -> "null" + (e.kind?.let { "::${it.sqlType}" } ?: "")
-            else -> bind(Bind.Const(v, e.kind!!)) + "::" + e.kind.sqlType
+            else -> if (bare) literal(v, e.kind!!) else bind(Bind.Const(v, e.kind!!)) + "::" + e.kind.sqlType
         }
         Expr.Nil -> SqlCompiler.NIL
         Expr.Now -> bind(Bind.Now) + "::bigint"

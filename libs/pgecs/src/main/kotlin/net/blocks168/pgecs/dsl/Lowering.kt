@@ -26,6 +26,7 @@ import net.blocks168.pgecs.ir.EntityVar
 import net.blocks168.pgecs.ir.Expr
 import net.blocks168.pgecs.ir.Functions
 import net.blocks168.pgecs.ir.IrBuilder
+import net.blocks168.pgecs.ir.QueryIr
 import net.blocks168.pgecs.ir.TermsBuilder
 import net.blocks168.pgecs.ir.ValueType
 import net.blocks168.pgecs.ir.ValueVar
@@ -81,6 +82,26 @@ internal class Lowering(private val q: QueryBuilder) {
             throw QueryBuildException("invalid query: ${e.message}", e)
         }
         return Query(ir, params.toList(), shape, executor)
+    }
+
+    /**
+     * `select f(e[component])` over every entity [subject] with [component]: how `index { }` and
+     * `unique { }` lambdas reach the SQL compiler, which renders the indexed expression exactly as it
+     * renders the same expression in a query. Captured values are refused (an index is fixed).
+     */
+    fun valueFunction(subject: QueryVariable, component: Component<*>, f: LambdaInstance): QueryIr {
+        for (v in q.variables) entityVars[v] = b.entity(uniqueName(v.name))
+        val binding = bind(b, subject, component, optional = false)
+        val e = asExpr(lowerLambda(f, listOf(valueOf(binding))), f)
+        if (params.isNotEmpty()) {
+            throw QueryBuildException("${component.name}: index and unique lambdas cannot use captured values (${f.decompiled.location})")
+        }
+        b.select("indexed", e)
+        return try {
+            b.build()
+        } catch (e: IllegalArgumentException) {
+            throw QueryBuildException("invalid index expression: ${e.message}", e)
+        }
     }
 
     // ---- names and parameters ----
