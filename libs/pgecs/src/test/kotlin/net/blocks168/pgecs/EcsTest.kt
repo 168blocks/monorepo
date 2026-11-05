@@ -363,6 +363,25 @@ class EcsTest {
     }
 
     @Test
+    fun `async and suspend transactions write and query like blocking ones`() {
+        val tag = "async${UUID.randomUUID()}"
+        val n = ecs.txAsync {
+            create { this[MailComponent] = Mail("$tag@a") }
+            query { val m by entity; m has MailComponent.where { it.address == "$tag@a" }; select { m } }.count()
+        }.get()
+        assertEquals(1, n)
+        val m = kotlinx.coroutines.runBlocking {
+            ecs.txSuspend { create { this[MailComponent] = Mail("$tag@b") } }
+            ecs.readSuspend {
+                kotlinx.coroutines.yield()
+                query { val m by entity; m has MailComponent.where { it.address == "$tag@b" }; select { m } }.count()
+            }
+        }
+        assertEquals(1, m)
+        assertEquals(1, ecs.readAsync { query { val x by entity; x has MailComponent.where { it.address == "$tag@a" }; select { x } }.count() }.get())
+    }
+
+    @Test
     fun `ChildOf's handle and the core spec agree`() {
         assertEquals(CoreComponents.CHILD_OF, ChildOf.toSpec())
     }
