@@ -24,8 +24,11 @@ data class FunctionId(val name: String) {
  */
 object Functions {
 
-    /** Parameter kinds and result type of a built-in. */
-    data class Signature(val params: List<Kind>, val result: ValueType)
+    /**
+     * Parameter kinds and result type of a built-in. A null parameter kind takes any scalar (not
+     * JSON, not a list); a null [result] is given by each call ([callTyped]).
+     */
+    data class Signature(val params: List<Kind?>, val result: ValueType?)
 
     /** `String.lowercase()` (`Locale.ROOT`, as Kotlin). */
     @JvmField val LOWERCASE = FunctionId("pgecs:lowercase")
@@ -60,6 +63,30 @@ object Functions {
      */
     @JvmField val NOW = FunctionId("pgecs:now")
 
+    /**
+     * `value in list`: [list] is a list parameter of [value]'s kind (a captured `Collection`).
+     * Never null: false when [value] is null, as `list.contains(null)` is for lists without nulls.
+     */
+    @JvmField val IN = FunctionId("pgecs:in")
+
+    /**
+     * `text ~ pattern`: a PostgreSQL regular expression (ARE) search, true when the pattern matches
+     * anywhere in the text. Full matches (`Regex.matches`) anchor the pattern when lowering.
+     */
+    @JvmField val REGEX = FunctionId("pgecs:regex")
+
+    /** `list.contains(x)` on a JSON array (a `List` field of a component value), for scalar [x]. */
+    @JvmField val JSON_CONTAINS = FunctionId("pgecs:jsonContains")
+
+    /** `list.size` of a JSON array; null when the value is not an array (a null list). */
+    @JvmField val JSON_SIZE = FunctionId("pgecs:jsonSize")
+
+    /**
+     * `list[i]` of a JSON array, read as the call's type like a field. Out of range (where Kotlin
+     * would throw) it is SQL null even when the type is not nullable, so the row does not match.
+     */
+    @JvmField val JSON_GET = FunctionId("pgecs:jsonGet")
+
     private val signatures: Map<FunctionId, Signature> = mapOf(
         LOWERCASE to Signature(listOf(Kind.TEXT), ValueType.TEXT),
         UPPERCASE to Signature(listOf(Kind.TEXT), ValueType.TEXT),
@@ -70,6 +97,11 @@ object Functions {
         CONTAINS to Signature(listOf(Kind.TEXT, Kind.TEXT), ValueType.BOOL),
         CONCAT to Signature(listOf(Kind.TEXT, Kind.TEXT), ValueType.TEXT),
         NOW to Signature(emptyList(), ValueType.INSTANT),
+        IN to Signature(listOf(null, null), ValueType.BOOL),
+        REGEX to Signature(listOf(Kind.TEXT, Kind.TEXT), ValueType.BOOL),
+        JSON_CONTAINS to Signature(listOf(Kind.JSON, null), ValueType.BOOL),
+        JSON_SIZE to Signature(listOf(Kind.JSON), ValueType.INT.asNullable()),
+        JSON_GET to Signature(listOf(Kind.JSON, Kind.INT), null),
     )
 
     /** All built-ins. */
@@ -89,9 +121,25 @@ object Functions {
     @JvmStatic
     fun call(fn: FunctionId, vararg args: Expr): Expr.Call {
         val sig = requireNotNull(signatures[fn]) { "$fn is not a built-in function" }
+        val result = requireNotNull(sig.result) { "$fn has no fixed result type; use callTyped" }
+        return callTyped(fn, result, *args)
+    }
+
+    /** A call of built-in [fn] with result [type] (for [JSON_GET], whose type is the element's). */
+    @JvmStatic
+    fun callTyped(fn: FunctionId, type: ValueType, vararg args: Expr): Expr.Call {
+        val sig = requireNotNull(signatures[fn]) { "$fn is not a built-in function" }
         require(args.size == sig.params.size) { "$fn takes ${sig.params.size} arguments, got ${args.size}" }
         require(fn != CONCAT || args.none { it.type.nullable }) { "$fn of a nullable string; Kotlin would print \"null\"" }
-        val nullable = args.any { it.type.nullable }
-        return Expr.Call(fn, args.asList(), if (nullable) sig.result.asNullable() else sig.result)
+        if (fn == IN) {
+            require(args[1].type.list && args[1].type.kind == args[0].type.kind) { "$fn needs a list of ${args[0].type.kind}, got ${args[1].type}" }
+            return Expr.Call(fn, args.asList(), ValueType.BOOL)
+        }
+        val nullable = args.any { it.type.nullable } || type.nullable
+        return Expr.Call(fn, args.asList(), if (nullable) type.asNullable() else type)
     }
+
+    /** Whether [fn] is never null, whatever its arguments ([IN]). */
+    @JvmStatic
+    fun neverNull(fn: FunctionId): Boolean = fn == IN
 }

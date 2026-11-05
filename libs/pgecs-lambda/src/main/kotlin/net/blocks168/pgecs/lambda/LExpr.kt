@@ -87,8 +87,22 @@ sealed interface LExpr {
         override val type: String get() = "Ljava/lang/String;"
     }
 
+    /**
+     * An array built in the lambda with constant size and constant indexes (the varargs of
+     * `listOf("a", "b")`, `arrayOf(...)`); [type] is the array descriptor (`[Ljava/lang/String;`).
+     */
+    data class ArrayOf(val elements: List<LExpr>, override val type: String) : LExpr
+
+    /**
+     * A collection literal: `listOf(...)`, `setOf(...)`, `emptyList()`, `List.of(...)`,
+     * `Arrays.asList(...)`. [type] is `Ljava/util/List;` or `Ljava/util/Set;`.
+     */
+    data class CollectionOf(val elements: List<LExpr>, override val type: String) : LExpr
+
     companion object {
         const val NULL_TYPE = "Ljava/lang/Object;"
+        const val LIST_TYPE = "Ljava/util/List;"
+        const val SET_TYPE = "Ljava/util/Set;"
         val TRUE = Const(true, "Z")
         val FALSE = Const(false, "Z")
     }
@@ -142,4 +156,6 @@ fun LExpr.render(): String = when (this) {
     is LExpr.Not -> "!${operand.render()}"
     is LExpr.Cond -> "(if ${condition.render()} then ${then.render()} else ${otherwise.render()})"
     is LExpr.Concat -> "concat(${parts.joinToString(", ") { it.render() }})"
+    is LExpr.ArrayOf -> "arrayOf(${elements.joinToString(", ") { it.render() }})"
+    is LExpr.CollectionOf -> (if (type == LExpr.SET_TYPE) "setOf" else "listOf") + "(${elements.joinToString(", ") { it.render() }})"
 }

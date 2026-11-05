@@ -103,8 +103,10 @@ internal class CanonicalParser private constructor(private val text: String) {
     private fun type(n: Node): ValueType {
         val s = n.atom()
         val nullable = s.endsWith("?")
-        val kind = ValueType.Kind.entries.firstOrNull { it.name.lowercase() == s.removeSuffix("?") } ?: fail("unknown type $s")
-        return ValueType(kind, nullable)
+        val base = s.removeSuffix("?")
+        val list = base.endsWith("[]")
+        val kind = ValueType.Kind.entries.firstOrNull { it.name.lowercase() == base.removeSuffix("[]") } ?: fail("unknown type $s")
+        return ValueType(kind, nullable, list)
     }
 
     private fun <E : Enum<E>> enumOf(values: Array<E>, n: Node): E {

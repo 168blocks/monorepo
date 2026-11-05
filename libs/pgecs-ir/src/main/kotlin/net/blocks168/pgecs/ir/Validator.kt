@@ -35,7 +35,7 @@ object Nullability {
         is Expr.If -> mayBeNull(e.then, nullVariables) || mayBeNull(e.otherwise, nullVariables)
         is Expr.Arith -> mayBeNull(e.left, nullVariables) || mayBeNull(e.right, nullVariables)
         is Expr.Negate -> mayBeNull(e.operand, nullVariables)
-        is Expr.Call -> e.type.nullable || e.args.any { mayBeNull(it, nullVariables) }
+        is Expr.Call -> !Functions.neverNull(e.fn) && (e.type.nullable || e.args.any { mayBeNull(it, nullVariables) })
         is Expr.Aggregate -> e.type.nullable
     }
 
@@ -232,7 +232,10 @@ internal class Validator private constructor(private val q: QueryIr) {
                     problem("$where: ${e.variable.name} is ${e.variable.type}, it has no field ${e.path.joinToString(".")}")
                 }
             }
-            is Expr.Param -> param(e)
+            is Expr.Param -> {
+                param(e)
+                if (e.type.list) problem("$where: list parameter ${e.index} outside of ${Functions.IN}")
+            }
             is Expr.Literal -> {}
             is Expr.Arg -> problem("$where: lambda argument ${e.index} was never substituted")
             is Expr.Compare -> {
@@ -259,13 +262,25 @@ internal class Validator private constructor(private val q: QueryIr) {
             is Expr.Arith -> { sub(e.left); sub(e.right) }
             is Expr.Negate -> sub(e.operand)
             is Expr.Call -> {
-                e.args.forEach(::sub)
+                val listArg = if (e.fn == Functions.IN) e.args.getOrNull(1) as? Expr.Param else null
+                e.args.forEach { if (it === listArg) param(listArg) else sub(it) }
                 val sig = Functions.signature(e.fn)
                 if (sig != null) {
-                    if (e.args.map { it.type.kind } != sig.params) {
-                        problem("$where: ${e.fn} takes ${sig.params}, got ${e.args.map { it.type }}")
+                    val kinds = e.args.map { it.type.kind }
+                    val fits = kinds.size == sig.params.size && kinds.indices.all { i ->
+                        val t = e.args[i].type
+                        val want = sig.params[i]
+                        when {
+                            e.fn == Functions.IN && i == 1 -> t.list
+                            want == null -> !t.list && t.kind != ValueType.Kind.JSON
+                            else -> !t.list && t.kind == want
+                        }
                     }
-                    if (e.type.asNonNull() != sig.result) problem("$where: ${e.fn} returns ${sig.result}, not ${e.type}")
+                    if (!fits) problem("$where: ${e.fn} takes ${sig.params}, got ${e.args.map { it.type }}")
+                    if (e.fn == Functions.IN && (listArg == null || listArg.type.kind != e.args[0].type.kind)) {
+                        problem("$where: ${e.fn} needs a list parameter of ${e.args[0].type.kind}: $e")
+                    }
+                    if (sig.result != null && e.type.asNonNull() != sig.result.asNonNull()) problem("$where: ${e.fn} returns ${sig.result}, not ${e.type}")
                     if (e.fn == Functions.CONCAT && e.args.any { mayBeNull(it, visible) }) {
                         problem("$where: string concatenation of a value that may be null (Kotlin would print \"null\"): $e")
                     }

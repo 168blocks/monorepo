@@ -10,6 +10,7 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.encoding.CompositeDecoder
 import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.descriptors.StructureKind
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.serializerOrNull
 import net.blocks168.pgecs.Capability
@@ -54,6 +55,7 @@ import net.blocks168.pgecs.serial.SerialTypes
  */
 @OptIn(ExperimentalSerializationApi::class)
 internal class Lowering(private val q: QueryBuilder) {
+
     private val b = IrBuilder()
     private val params = ArrayList<Any?>()
     private val entityVars = IdentityHashMap<QueryVariable, EntityVar>()
@@ -225,7 +227,16 @@ internal class Lowering(private val q: QueryBuilder) {
         data class Obj(val value: Any, val captured: Boolean) : LV
 
         /** A constructor or `to`, only valid as the result of `select`. */
-        data class Ctor(val build: (List<Any?>) -> Any?, val args: List<LV>, val argTypes: List<String>) : LV
+        data class Ctor(val build: (List<Any?>) -> Any?, val args: List<LV>, val argTypes: List<String>, val key: String) : LV
+
+        /** A collection or array literal written in the lambda: `listOf("a", b)`, `setOf(...)`. */
+        data class Coll(val elements: List<LV>) : LV
+
+        /** A regular expression, [pattern] a PostgreSQL ARE (`Regex("...")`, `Pattern.compile`). */
+        data class Rx(val pattern: LV, val ignoreCase: Boolean) : LV
+
+        /** `pattern.matcher(subject)`, waiting for `matches()` or `find()`. */
+        data class Matcher(val regex: Rx, val subject: LV) : LV
     }
 
     /** Where a lowering happens: the lambda (null for builder calls outside lambdas) and its arguments. */
@@ -262,11 +273,13 @@ internal class Lowering(private val q: QueryBuilder) {
             else -> LV.Obj(v, captured = false)
         }
         is LExpr.Invoke -> call(e, ctx)
-        is LExpr.New -> {
+        is LExpr.New -> if (e.owner == "kotlin/text/Regex") newRegex(e, ctx) else {
             val owner = e.owner
-            LV.Ctor(constructorOf(owner, e.descriptor, ctx), e.args.map { lower(it, ctx) }, e.args.map { it.type })
+            LV.Ctor(constructorOf(owner, e.descriptor, ctx), e.args.map { lower(it, ctx) }, e.args.map { it.type }, owner + e.descriptor)
         }
-        is LExpr.Compare -> compare(e.op, lower(e.left, ctx), lower(e.right, ctx), ctx)
+        is LExpr.ArrayOf -> LV.Coll(e.elements.map { lower(it, ctx) })
+        is LExpr.CollectionOf -> LV.Coll(e.elements.map { lower(it, ctx) })
+        is LExpr.Compare -> regexFound(e, ctx) ?: compare(e.op, lower(e.left, ctx), lower(e.right, ctx), ctx)
         is LExpr.And -> LV.E(and(asBool(lower(e.left, ctx), ctx), asBool(lower(e.right, ctx), ctx)))
         is LExpr.Or -> LV.E(or(asBool(lower(e.left, ctx), ctx), asBool(lower(e.right, ctx), ctx)))
         is LExpr.Not -> LV.E(Expr.Not(asBool(lower(e.operand, ctx), ctx)))
@@ -305,10 +318,25 @@ internal class Lowering(private val q: QueryBuilder) {
     }
 
     /** `x ?: d` arrives as `if (x == null) d else x` and becomes `Coalesce`; other ifs become `If`. */
-    private fun conditional(e: LExpr.Cond, ctx: Ctx): LV {
-        val c = asBool(lower(e.condition, ctx), ctx)
-        val t = asExpr(lower(e.then, ctx), ctx)
-        val f = asExpr(lower(e.otherwise, ctx), ctx)
+    private fun conditional(e: LExpr.Cond, ctx: Ctx): LV =
+        choose(asBool(lower(e.condition, ctx), ctx), lower(e.then, ctx), lower(e.otherwise, ctx), ctx)
+
+    /**
+     * `if (c) then else otherwise`. When both sides construct the same type (`a to when (x) {...}`
+     * compiles to one `to` per branch), the condition moves into the arguments that differ.
+     */
+    private fun choose(c: Expr, then: LV, otherwise: LV, ctx: Ctx): LV {
+        if (then is LV.Ctor && otherwise is LV.Ctor && then.key == otherwise.key && then.args.size == otherwise.args.size) {
+            val args = then.args.indices.map { i ->
+                val a = then.args[i]
+                val b = otherwise.args[i]
+                if (a == b) a else choose(c, a, b, ctx)
+            }
+            return then.copy(args = args)
+        }
+        if (then == otherwise) return then
+        val t = asExpr(then, ctx)
+        val f = asExpr(otherwise, ctx)
         return when {
             c is Expr.IsNull -> LV.E(Expr.Coalesce(listOf(f, t)))
             c is Expr.Not && c.operand is Expr.IsNull -> LV.E(Expr.Coalesce(listOf(t, f)))
@@ -349,6 +377,8 @@ internal class Lowering(private val q: QueryBuilder) {
         LV.Null -> fail(ctx, "null is only translatable in == / != comparisons")
         is LV.Ctor -> fail(ctx, "objects can only be constructed as the result of select")
         is LV.Obj -> objExpr(lv, ctx)
+        is LV.Coll -> fail(ctx, "a collection literal is only translatable as the receiver of contains, size, get, first, last or isEmpty")
+        is LV.Rx, is LV.Matcher -> fail(ctx, "a regular expression is only translatable in matches, containsMatchIn, find or matchEntire")
     }
 
     /** How kotlinx.serialization stores [e]: its `@SerialName`, else its name. */
@@ -406,7 +436,7 @@ internal class Lowering(private val q: QueryBuilder) {
             }
         }
         if (c.owner == "kotlin/TuplesKt" && c.name == "to" && args.size == 2) {
-            return LV.Ctor({ Pair(it[0], it[1]) }, args, c.args.map { it.type })
+            return LV.Ctor({ Pair(it[0], it[1]) }, args, c.args.map { it.type }, "kotlin/Pair")
         }
         // acc.id / p.id: an entity's UUID
         if (r != null && r.value is EntityId && c.name == "getId" && args.isEmpty()) {
@@ -415,6 +445,8 @@ internal class Lowering(private val q: QueryBuilder) {
         if (recv is LV.E && args.isEmpty() && recv.descriptor != null && SerialTypes.isObject(recv.descriptor)) {
             return field(recv, c, ctx)
         }
+        collection(c, recv, args, ctx)?.let { return it }
+        regex(c, recv, args, ctx)?.let { return it }
         text(c, recv, args, ctx)?.let { return it }
         time(c, recv, args, ctx)?.let { return it }
         fail(ctx, "call to ${c.qualifiedName} is not translatable")
@@ -523,6 +555,341 @@ internal class Lowering(private val q: QueryBuilder) {
         return null
     }
 
+    // ---- collections ----
+
+    private enum class CollOp { CONTAINS, CONTAINS_ALL, SIZE, IS_EMPTY, GET, GET_OR_NULL, FIRST, FIRST_OR_NULL, LAST, LAST_OR_NULL }
+
+    private val collectionOwners = setOf(
+        "java/util/List", "java/util/Set", "java/util/Collection", "java/util/ArrayList", "java/util/LinkedHashSet",
+        "java/util/HashSet", "java/lang/Iterable",
+    )
+
+    /**
+     * `contains`, `size`, `isEmpty`, `get`, `first`, `last` (and the `OrNull` forms), `containsAll`
+     * on a collection literal, a captured collection or array, or a `List`/`Set` field of a component.
+     */
+    private fun collection(c: LExpr.Invoke, recv: LV?, args: List<LV>, ctx: Ctx): LV? {
+        val (op, target, rest) = when {
+            recv != null && c.owner in collectionOwners -> when (c.name) {
+                "contains" -> CollOp.CONTAINS
+                "containsAll" -> CollOp.CONTAINS_ALL
+                "size" -> CollOp.SIZE
+                "isEmpty" -> CollOp.IS_EMPTY
+                "get" -> CollOp.GET
+                else -> return null
+            }.let { Triple(it, recv, args) }
+            recv == null && args.isNotEmpty() && (c.owner == "kotlin/collections/CollectionsKt" || c.owner == "kotlin/collections/ArraysKt") ->
+                when (c.name) {
+                    "contains" -> CollOp.CONTAINS
+                    "first" -> CollOp.FIRST
+                    "firstOrNull" -> CollOp.FIRST_OR_NULL
+                    "last" -> CollOp.LAST
+                    "lastOrNull" -> CollOp.LAST_OR_NULL
+                    "getOrNull" -> CollOp.GET_OR_NULL
+                    "elementAt" -> CollOp.GET
+                    else -> return null
+                }.let { Triple(it, args[0], args.drop(1)) }
+            else -> return null
+        }
+        return when (target) {
+            is LV.Coll -> literalCollection(op, target.elements, rest, ctx)
+            is LV.Obj -> {
+                val items = jvmItems(target.value) ?: return null
+                capturedCollection(op, items, target.captured, rest, ctx)
+            }
+            is LV.E -> {
+                val d = target.descriptor
+                if (target.expr.type.kind != ValueType.Kind.JSON || d == null || d.kind != StructureKind.LIST) {
+                    fail(ctx, "${c.name} is only translatable on List and Set fields, collection literals and captured collections")
+                }
+                jsonList(op, target, d.getElementDescriptor(0), rest, ctx)
+            }
+            else -> null
+        }
+    }
+
+    private fun jvmItems(v: Any): List<Any?>? = when (v) {
+        is Collection<*> -> v.toList()
+        is Array<*> -> v.toList()
+        else -> if (v.javaClass.isArray) List(java.lang.reflect.Array.getLength(v)) { java.lang.reflect.Array.get(v, it) } else null
+    }
+
+    private fun constIndex(lv: LV, ctx: Ctx): Int? = when {
+        lv is LV.Obj && !lv.captured && lv.value is Number -> (lv.value as Number).toInt()
+        lv is LV.E && lv.expr is Expr.Literal && (lv.expr as Expr.Literal).value is Long -> ((lv.expr as Expr.Literal).value as Long).toInt()
+        else -> null
+    }
+
+    private fun bool(v: Boolean, captured: Boolean): LV.E = LV.E(if (captured) param(ValueType.BOOL, v) else Expr.Literal(v, ValueType.BOOL))
+
+    /** Kotlin's `contains` over the literal's elements: `x == a || x == b`. */
+    private fun literalCollection(op: CollOp, elements: List<LV>, rest: List<LV>, ctx: Ctx): LV {
+        fun at(i: Int, orNull: Boolean): LV = elements.getOrNull(i)
+            ?: if (orNull) LV.Null else fail(ctx, "index $i is out of range of a collection literal of ${elements.size}")
+        return when (op) {
+            CollOp.CONTAINS -> LV.E(
+                elements.map { asBool(compare(CmpOp.EQ, rest[0], it, ctx), ctx) }
+                    .fold(Expr.Literal(false, ValueType.BOOL) as Expr) { acc, e -> if (acc == Expr.Literal(false, ValueType.BOOL)) e else or(acc, e) },
+            )
+            CollOp.CONTAINS_ALL -> {
+                val other = rest[0] as? LV.Coll ?: fail(ctx, "containsAll of a collection literal needs a collection literal")
+                LV.E(other.elements.map { asBool(literalCollection(CollOp.CONTAINS, elements, listOf(it), ctx), ctx) }
+                    .fold(Expr.Literal(true, ValueType.BOOL) as Expr) { acc, e -> if (acc == Expr.Literal(true, ValueType.BOOL)) e else and(acc, e) })
+            }
+            CollOp.SIZE -> LV.E(Expr.Literal(elements.size.toLong(), ValueType.INT))
+            CollOp.IS_EMPTY -> LV.E(Expr.Literal(elements.isEmpty(), ValueType.BOOL))
+            CollOp.GET, CollOp.GET_OR_NULL -> at(constIndex(rest[0], ctx) ?: fail(ctx, "get on a collection literal needs a constant index"), op == CollOp.GET_OR_NULL)
+            CollOp.FIRST, CollOp.FIRST_OR_NULL -> at(0, op == CollOp.FIRST_OR_NULL)
+            CollOp.LAST, CollOp.LAST_OR_NULL -> at(elements.size - 1, op == CollOp.LAST_OR_NULL)
+        }
+    }
+
+    /** A captured collection: `x in names` is `x = any(?)` with the elements as one list parameter. */
+    private fun capturedCollection(op: CollOp, items: List<Any?>, captured: Boolean, rest: List<LV>, ctx: Ctx): LV {
+        fun at(i: Int, orNull: Boolean): LV = when {
+            i in items.indices -> items[i]?.let { LV.Obj(it, captured) } ?: LV.Null
+            orNull -> LV.Null
+            else -> fail(ctx, "index $i is out of range of a captured collection of ${items.size}")
+        }
+        return when (op) {
+            CollOp.CONTAINS -> when (val x = rest[0]) {
+                is LV.Obj -> if (x.value is QueryVariable) {
+                    capturedCollection(op, items, captured, listOf(LV.E(objExpr(x, ctx))), ctx)
+                } else bool(items.contains(x.value), captured || x.captured)
+                LV.Null -> bool(items.contains(null), captured)
+                else -> {
+                    val value = asExpr(x, ctx)
+                    val kind = value.type.kind
+                    if (kind == ValueType.Kind.JSON) fail(ctx, "contains of objects or lists is not translatable")
+                    val normalized = items.filterNotNull().map { normalizeItem(it, kind, ctx) }
+                    val test = Functions.callTyped(Functions.IN, ValueType.BOOL, value, param(ValueType.listOf(kind), normalized))
+                    if (items.contains(null) && value.type.nullable) LV.E(or(Expr.IsNull(value), test)) else LV.E(test)
+                }
+            }
+            CollOp.CONTAINS_ALL -> when (val other = rest[0]) {
+                is LV.Coll -> LV.E(other.elements.map { asBool(capturedCollection(CollOp.CONTAINS, items, captured, listOf(it), ctx), ctx) }
+                    .fold(Expr.Literal(true, ValueType.BOOL) as Expr) { acc, e -> if (acc == Expr.Literal(true, ValueType.BOOL)) e else and(acc, e) })
+                is LV.Obj -> bool(items.containsAll(jvmItems(other.value) ?: fail(ctx, "containsAll needs a collection")), captured || other.captured)
+                else -> fail(ctx, "containsAll of a captured collection needs a collection literal or a captured collection")
+            }
+            CollOp.SIZE -> LV.E(if (captured) param(ValueType.INT, items.size.toLong()) else Expr.Literal(items.size.toLong(), ValueType.INT))
+            CollOp.IS_EMPTY -> bool(items.isEmpty(), captured)
+            CollOp.GET, CollOp.GET_OR_NULL -> at(constIndex(rest[0], ctx) ?: fail(ctx, "get on a captured collection needs a constant index"), op == CollOp.GET_OR_NULL)
+            CollOp.FIRST, CollOp.FIRST_OR_NULL -> at(0, op == CollOp.FIRST_OR_NULL)
+            CollOp.LAST, CollOp.LAST_OR_NULL -> at(items.size - 1, op == CollOp.LAST_OR_NULL)
+        }
+    }
+
+    /** An element of a captured collection as the IR value of [kind] (what a parameter of that kind holds). */
+    private fun normalizeItem(v: Any, kind: ValueType.Kind, ctx: Ctx): Any = when (kind) {
+        ValueType.Kind.TEXT -> when (v) {
+            is String -> v
+            is Char -> v.toString()
+            is Enum<*> -> serialName(v)
+            else -> null
+        }
+        ValueType.Kind.INT -> (v as? Number)?.takeIf { it is Long || it is Int || it is Short || it is Byte }?.toLong()
+        ValueType.Kind.FLOAT -> (v as? Number)?.toDouble()
+        ValueType.Kind.BOOL -> v as? Boolean
+        ValueType.Kind.UUID -> when (v) {
+            is EntityId -> if (v is QueryVariable) null else v.id
+            is UUID -> v
+            else -> null
+        }
+        ValueType.Kind.INSTANT -> v as? Instant
+        ValueType.Kind.DURATION -> v as? Duration
+        ValueType.Kind.JSON -> null
+    } ?: fail(ctx, "a ${v.javaClass.name} in the collection cannot be compared with a $kind value")
+
+    /** A `List`/`Set` field: a JSON array in the component value. */
+    private fun jsonList(op: CollOp, list: LV.E, element: SerialDescriptor, rest: List<LV>, ctx: Ctx): LV {
+        val elementType = SerialTypes.valueType(element)
+        val listExpr = list.expr
+        fun nonNull(e: Expr, default: Expr): Expr = if (listExpr.type.nullable) e else Expr.Coalesce(listOf(e, default))
+        val size = nonNull(Functions.call(Functions.JSON_SIZE, listExpr), Expr.Literal(0L, ValueType.INT))
+        fun get(index: Expr, orNull: Boolean): LV {
+            val t = if (orNull) elementType.asNullable() else elementType
+            val e = Functions.callTyped(Functions.JSON_GET, t, listExpr, index)
+            return LV.E(e, descriptor = element, loader = list.loader, maybeNull = true)
+        }
+        return when (op) {
+            CollOp.CONTAINS -> {
+                if (elementType.kind == ValueType.Kind.JSON) fail(ctx, "contains on a list of objects or lists is not translatable")
+                val x = rest[0]
+                val value = if (x == LV.Null) fail(ctx, "contains(null) on a list field is not translatable") else asExpr(x, ctx)
+                if (value.type.kind == ValueType.Kind.JSON) fail(ctx, "contains of objects or lists is not translatable")
+                LV.E(nonNull(Functions.call(Functions.JSON_CONTAINS, listExpr, value), Expr.Literal(false, ValueType.BOOL)))
+            }
+            CollOp.CONTAINS_ALL -> {
+                val elems = when (val other = rest[0]) {
+                    is LV.Coll -> other.elements
+                    is LV.Obj -> (jvmItems(other.value) ?: fail(ctx, "containsAll needs a collection")).map { if (it == null) LV.Null else LV.Obj(it, other.captured) }
+                    else -> fail(ctx, "containsAll on a list field needs a collection literal or a captured collection")
+                }
+                LV.E(elems.map { asBool(jsonList(CollOp.CONTAINS, list, element, listOf(it), ctx), ctx) }
+                    .fold(Expr.Literal(true, ValueType.BOOL) as Expr) { acc, e -> if (acc == Expr.Literal(true, ValueType.BOOL)) e else and(acc, e) })
+            }
+            CollOp.SIZE -> LV.E(size)
+            CollOp.IS_EMPTY -> LV.E(Expr.Compare(CompareOp.EQ, size, Expr.Literal(0L, ValueType.INT)))
+            CollOp.GET, CollOp.GET_OR_NULL -> get(asExpr(rest[0], ctx).also {
+                if (it.type.kind != ValueType.Kind.INT) fail(ctx, "a list index must be an integer")
+            }, op == CollOp.GET_OR_NULL)
+            CollOp.FIRST, CollOp.FIRST_OR_NULL -> get(Expr.Literal(0L, ValueType.INT), op == CollOp.FIRST_OR_NULL)
+            CollOp.LAST, CollOp.LAST_OR_NULL ->
+                get(Expr.Arith(ArithOp.MINUS, size, Expr.Literal(1L, ValueType.INT)), op == CollOp.LAST_OR_NULL)
+        }
+    }
+
+    // ---- regular expressions ----
+
+    /** How much of the text a regex call must match. */
+    private enum class RxMode { FULL, PREFIX, FIND }
+
+    /** `Regex(pattern)` and `Regex(pattern, RegexOption.IGNORE_CASE)`; `"...".toRegex()` compiles to the same. */
+    private fun newRegex(e: LExpr.New, ctx: Ctx): LV {
+        val args = e.args.map { lower(it, ctx) }
+        return when (e.descriptor) {
+            "(Ljava/lang/String;)V" -> LV.Rx(args[0], ignoreCase = false)
+            "(Ljava/lang/String;Lkotlin/text/RegexOption;)V" -> {
+                val option = (args[1] as? LV.Obj)?.value as? RegexOption
+                    ?: fail(ctx, "the regex option must be a constant RegexOption")
+                LV.Rx(args[0], ignoreCase = regexIgnoreCase(setOf(option), ctx))
+            }
+            else -> fail(ctx, "Regex${e.descriptor} is not translatable")
+        }
+    }
+
+    private fun regexIgnoreCase(options: Set<RegexOption>, ctx: Ctx): Boolean {
+        val other = options - RegexOption.IGNORE_CASE
+        if (other.isNotEmpty()) fail(ctx, "regex options $other are not translatable (only IGNORE_CASE)")
+        return RegexOption.IGNORE_CASE in options
+    }
+
+    /** [lv] as a regex: a [LV.Rx], or a captured or constant `Regex` / `Pattern`. */
+    private fun asRegex(lv: LV?, ctx: Ctx): LV.Rx? = when {
+        lv is LV.Rx -> lv
+        lv is LV.Obj && lv.value is Regex -> LV.Rx(LV.Obj((lv.value as Regex).pattern, lv.captured), regexIgnoreCase((lv.value as Regex).options, ctx))
+        lv is LV.Obj && lv.value is java.util.regex.Pattern -> {
+            val p = lv.value as java.util.regex.Pattern
+            if (p.flags() and java.util.regex.Pattern.CASE_INSENSITIVE.inv() != 0) fail(ctx, "Pattern flags other than CASE_INSENSITIVE are not translatable")
+            LV.Rx(LV.Obj(p.pattern(), lv.captured), p.flags() and java.util.regex.Pattern.CASE_INSENSITIVE != 0)
+        }
+        else -> null
+    }
+
+    /**
+     * Regex calls, with PostgreSQL's regular expressions (ARE): `Regex.matches` / `String.matches` /
+     * `Matcher.matches` match the whole text, `containsMatchIn` / `Matcher.find` anywhere,
+     * `Matcher.lookingAt` at the start. The pattern is passed to PostgreSQL as written.
+     */
+    private fun regex(c: LExpr.Invoke, recv: LV?, args: List<LV>, ctx: Ctx): LV? {
+        when (c.owner) {
+            "kotlin/text/Regex" -> {
+                val rx = asRegex(recv, ctx) ?: return null
+                return when (c.name) {
+                    "matches" -> regexTest(args[0], rx, RxMode.FULL, ctx)
+                    "containsMatchIn" -> regexTest(args[0], rx, RxMode.FIND, ctx)
+                    else -> fail(ctx, "Regex.${c.name} is not translatable (matches, containsMatchIn, find(..) != null, matchEntire(..) != null are)")
+                }
+            }
+            "java/util/regex/Pattern" -> {
+                if (recv == null) {
+                    return when (c.name) {
+                        "compile" -> {
+                            val flags = if (args.size == 2) constIndex(args[1], ctx) ?: fail(ctx, "Pattern flags must be constant") else 0
+                            if (flags and java.util.regex.Pattern.CASE_INSENSITIVE.inv() != 0) fail(ctx, "Pattern flags other than CASE_INSENSITIVE are not translatable")
+                            LV.Rx(args[0], flags and java.util.regex.Pattern.CASE_INSENSITIVE != 0)
+                        }
+                        "matches" -> regexTest(args[1], LV.Rx(args[0], false), RxMode.FULL, ctx)
+                        else -> null
+                    }
+                }
+                val rx = asRegex(recv, ctx) ?: return null
+                return if (c.name == "matcher") LV.Matcher(rx, args[0]) else null
+            }
+            "java/util/regex/Matcher" -> {
+                val m = recv as? LV.Matcher ?: fail(ctx, "a Matcher is only translatable straight from pattern.matcher(text)")
+                return when (c.name) {
+                    "matches" -> regexTest(m.subject, m.regex, RxMode.FULL, ctx)
+                    "find" -> if (args.isEmpty()) regexTest(m.subject, m.regex, RxMode.FIND, ctx) else null
+                    "lookingAt" -> regexTest(m.subject, m.regex, RxMode.PREFIX, ctx)
+                    else -> null
+                }
+            }
+            "java/lang/String" -> if (c.name == "matches" && recv != null && args.size == 1) {
+                return regexTest(recv, LV.Rx(args[0], false), RxMode.FULL, ctx)
+            }
+        }
+        return null
+    }
+
+    /** `rx.find(text) != null` (any match) and `rx.matchEntire(text) != null` (whole text). */
+    private fun regexFound(e: LExpr.Compare, ctx: Ctx): LV? {
+        if (e.op != CmpOp.EQ && e.op != CmpOp.NE) return null
+        val (call, other) = when {
+            e.right is LExpr.Const && (e.right as LExpr.Const).value == null -> e.left to e.right
+            e.left is LExpr.Const && (e.left as LExpr.Const).value == null -> e.right to e.left
+            else -> return null
+        }
+        if (call !is LExpr.Invoke || call.owner != "kotlin/text/Regex" || other !is LExpr.Const) return null
+        val mode = when (call.name) {
+            "find", "find\$default" -> RxMode.FIND
+            "matchEntire" -> RxMode.FULL
+            else -> return null
+        }
+        // find(text, startIndex = 0): a static `$default` bridge takes the regex first
+        val (rxArg, rest) = call.receiver?.let { it to call.args } ?: (call.args[0] to call.args.drop(1))
+        if (mode == RxMode.FIND && rest.size >= 2) {
+            val start = lower(rest[1], ctx)
+            if (constIndex(start, ctx) != 0) fail(ctx, "Regex.find with a start index is not translatable")
+        }
+        val rx = asRegex(lower(rxArg, ctx), ctx) ?: return null
+        val found = asBool(regexTest(lower(rest[0], ctx), rx, mode, ctx), ctx)
+        return LV.E(if (e.op == CmpOp.NE) found else Expr.Not(found))
+    }
+
+    private fun regexTest(subject: LV, rx: LV.Rx, mode: RxMode, ctx: Ctx): LV {
+        val text = textArg(subject, ctx) ?: fail(ctx, "a regex matches text only")
+        return LV.E(Functions.call(Functions.REGEX, text, regexPattern(rx, mode, ctx)))
+    }
+
+    /**
+     * The PostgreSQL pattern for [rx] in [mode]: anchored as `^(?:p)$` for a full match, with the
+     * case-insensitive option `(?i)` in front. A known pattern (a constant or captured string) keeps
+     * its own leading embedded options (`(?i)...`) in front, where PostgreSQL requires them.
+     */
+    private fun regexPattern(rx: LV.Rx, mode: RxMode, ctx: Ctx): Expr {
+        val p = rx.pattern
+        val known = when {
+            p is LV.Obj && p.value is String -> p.value as String
+            p is LV.E && p.expr is Expr.Literal && (p.expr as Expr.Literal).type.kind == ValueType.Kind.TEXT -> (p.expr as Expr.Literal).value as String
+            else -> null
+        }
+        if (known != null) {
+            val options = EMBEDDED_OPTIONS.find(known)
+            var flags = options?.groupValues?.get(1).orEmpty()
+            val core = if (options != null) known.substring(options.range.last + 1) else known
+            if (rx.ignoreCase && 'i' !in flags) flags += "i"
+            val anchored = when (mode) {
+                RxMode.FULL -> "^(?:$core)$"
+                RxMode.PREFIX -> "^(?:$core)"
+                RxMode.FIND -> core
+            }
+            val full = (if (flags.isEmpty()) "" else "(?$flags)") + anchored
+            return if (p is LV.Obj && p.captured) param(ValueType.TEXT, full) else Expr.Literal(full, ValueType.TEXT)
+        }
+        val e = textArg(p, ctx) ?: fail(ctx, "a regex pattern must be text")
+        if (e.type.nullable) fail(ctx, "a regex pattern that may be null is not translatable")
+        fun lit(s: String) = Expr.Literal(s, ValueType.TEXT)
+        fun cat(vararg parts: Expr) = parts.reduce { a, b -> Functions.call(Functions.CONCAT, a, b) }
+        val anchored = when (mode) {
+            RxMode.FULL -> cat(lit("^(?:"), e, lit(")$"))
+            RxMode.PREFIX -> cat(lit("^(?:"), e, lit(")"))
+            RxMode.FIND -> e
+        }
+        return if (rx.ignoreCase) cat(lit("(?i)"), anchored) else anchored
+    }
+
     /** Whitelisted Instant methods. */
     private fun time(c: LExpr.Invoke, recv: LV?, args: List<LV>, ctx: Ctx): LV? {
         if (c.owner != "java/time/Instant" || recv == null) return null
@@ -569,6 +936,7 @@ internal class Lowering(private val q: QueryBuilder) {
             else RowShape.Constant(v) // a captured value selected as is
         }
         is LV.E -> column(lv, jvmType)
+        is LV.Coll, is LV.Rx, is LV.Matcher -> column(LV.E(asExpr(lv, ctx)), jvmType)
     }
 
     private fun column(lv: LV.E, jvmType: String): RowShape {
@@ -638,6 +1006,9 @@ internal class Lowering(private val q: QueryBuilder) {
 
     private companion object {
         const val ENTITY_ID = "Lnet/blocks168/pgecs/EntityId;"
+
+        /** Embedded options at the start of a PostgreSQL ARE, `(?i)`. */
+        val EMBEDDED_OPTIONS = Regex("^\\(\\?([bceimnpqstwx]+)\\)")
 
         fun toUuid(raw: Any): UUID = raw as? UUID ?: UUID.fromString(raw.toString())
     }

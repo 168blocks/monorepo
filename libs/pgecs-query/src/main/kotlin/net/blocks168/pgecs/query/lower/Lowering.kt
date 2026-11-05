@@ -279,10 +279,29 @@ private class Lowerer(private val ir: QueryIr, private val nullParams: Set<Int>)
         is IrExpr.IsNull -> isNull(e.operand, scope, positive)
         is IrExpr.Exists -> exists(e.terms, scope).let { if (positive) it else negate(it) }
         is IrExpr.Literal -> if ((e.value as Boolean) == positive) Pred.True else Pred.False
+        is IrExpr.Call -> if (e.fn == Functions.IN) inList(e, scope, positive) else {
+            val x = expr(e, scope)
+            if (positive) Pred.Test(x) else Pred.Not(Pred.Test(x))
+        }
         else -> {
             val x = expr(e, scope)
             if (positive) Pred.Test(x) else Pred.Not(Pred.Test(x))
         }
+    }
+
+    /**
+     * `value in list`: `value = any(list)`. Kotlin's `contains` is false for a null value (the list
+     * has no nulls), so the negation also holds for null values.
+     */
+    private fun inList(e: IrExpr.Call, scope: Scope, positive: Boolean): Pred {
+        val value = expr(e.args[0], scope)
+        val p = e.args[1] as IrExpr.Param
+        if (p.index in nullParams) error("list parameter ${p.index} is null")
+        // a UUID stored as a string in a field compares as text, as in `unify`
+        val kind = if (value.kind == Kind.STRING) Kind.STRING else Lowering.kindOf(p.type)
+        val test = Pred.InList(value, Expr.Param(p.index, kind, list = true))
+        if (positive) return test
+        return if (mayBeNull(e.args[0], scope)) Pred.or(listOf(Pred.IsNull(value), Pred.Not(test))) else Pred.Not(test)
     }
 
     private fun negate(p: Pred): Pred = when (p) {
@@ -302,7 +321,7 @@ private class Lowerer(private val ir: QueryIr, private val nullParams: Set<Int>)
         is IrExpr.Coalesce -> e.operands.all { mayBeNull(it, scope) }
         is IrExpr.Arith -> mayBeNull(e.left, scope) || mayBeNull(e.right, scope)
         is IrExpr.Negate -> mayBeNull(e.operand, scope)
-        is IrExpr.Call -> e.args.any { mayBeNull(it, scope) } || (e.type.nullable && e.args.isEmpty())
+        is IrExpr.Call -> !Functions.neverNull(e.fn) && (e.args.any { mayBeNull(it, scope) } || (e.type.nullable && e.args.isEmpty()) || e.fn == Functions.JSON_GET || e.fn == Functions.JSON_SIZE)
         is IrExpr.If -> mayBeNull(e.then, scope) || mayBeNull(e.otherwise, scope)
         is IrExpr.Aggregate -> e.type.nullable
         is IrExpr.Arg -> true
@@ -392,7 +411,7 @@ private class Lowerer(private val ir: QueryIr, private val nullParams: Set<Int>)
             val k = Lowering.kindOf(e.type)
             Expr.Arith(ArithOp.SUB, Expr.Const(if (k == Kind.DOUBLE) 0.0 else 0L, k), expr(e.operand, scope), k)
         }
-        is IrExpr.Call -> call(e, scope)
+        is IrExpr.Call -> if (e.fn == Functions.IN) Expr.Bool(pred(e, scope, positive = true)) else call(e, scope)
         is IrExpr.If -> Expr.If(pred(e.condition, scope, positive = true), expr(e.then, scope), expr(e.otherwise, scope), Lowering.kindOf(e.type))
         is IrExpr.Aggregate -> Expr.Aggregate(
             when (e.fn) {
@@ -421,6 +440,10 @@ private class Lowerer(private val ir: QueryIr, private val nullParams: Set<Int>)
             Functions.CONTAINS -> Fn.CONTAINS
             Functions.CONCAT -> Fn.CONCAT
             Functions.NOW -> return Expr.Now
+            Functions.REGEX -> Fn.REGEX
+            Functions.JSON_CONTAINS -> Fn.JSON_CONTAINS
+            Functions.JSON_SIZE -> Fn.JSON_SIZE
+            Functions.JSON_GET -> return Expr.Call(Fn.JSON_GET, args, Lowering.fieldKind(e.type))
             else -> throw UnsupportedQueryException("function ${e.fn} cannot run in Postgres")
         }
         return Expr.Call(fn, args, fn.kind)

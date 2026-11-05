@@ -6,6 +6,8 @@ import java.lang.classfile.Instruction
 import java.lang.classfile.Label
 import java.lang.classfile.Opcode
 import java.lang.classfile.TypeKind
+import java.lang.classfile.instruction.ArrayLoadInstruction
+import java.lang.classfile.instruction.ArrayStoreInstruction
 import java.lang.classfile.instruction.BranchInstruction
 import java.lang.classfile.instruction.ConstantInstruction
 import java.lang.classfile.instruction.ConvertInstruction
@@ -16,12 +18,17 @@ import java.lang.classfile.instruction.InvokeInstruction
 import java.lang.classfile.instruction.LabelTarget
 import java.lang.classfile.instruction.LineNumber
 import java.lang.classfile.instruction.LoadInstruction
+import java.lang.classfile.instruction.LookupSwitchInstruction
 import java.lang.classfile.instruction.NewObjectInstruction
+import java.lang.classfile.instruction.NewPrimitiveArrayInstruction
+import java.lang.classfile.instruction.NewReferenceArrayInstruction
 import java.lang.classfile.instruction.NopInstruction
 import java.lang.classfile.instruction.OperatorInstruction
 import java.lang.classfile.instruction.ReturnInstruction
 import java.lang.classfile.instruction.StackInstruction
 import java.lang.classfile.instruction.StoreInstruction
+import java.lang.classfile.instruction.SwitchCase
+import java.lang.classfile.instruction.TableSwitchInstruction
 import java.lang.classfile.instruction.ThrowInstruction
 import java.lang.classfile.instruction.TypeCheckInstruction
 import java.lang.constant.DirectMethodHandleDesc
@@ -33,8 +40,13 @@ import java.lang.constant.MethodTypeDesc
  * Every conditional branch forks the whole continuation, so the method becomes a decision tree with
  * one leaf per path. The tree is then folded back into an expression: boolean methods become
  * `&&`/`||`/`!` formulas over the branch conditions, others become [LExpr.Cond]. Paths that throw
- * (Kotlin's `!!`, failed checks) are dropped. Loops, switches, arrays, `instanceof`, monitors and
- * calls without a result are rejected, since none of them has a meaning in a query.
+ * (Kotlin's `!!`, failed checks) are dropped.
+ *
+ * Switches (`when`) fork into one path per case: on an int, on a String (`hashCode` switch followed by
+ * `equals`, as kotlinc and javac compile it), and on an enum (the `ordinal` lookup in the compiler's
+ * `$EnumSwitchMapping$`/`$SwitchMap$` array). Arrays are understood only as literals: a new array of
+ * constant size filled at constant indexes, the varargs of `listOf(...)`. Loops, `instanceof`,
+ * monitors and calls without a result are rejected, since none of them has a meaning in a query.
  */
 internal class SymbolicExecutor(
     private val location: String,
@@ -44,6 +56,8 @@ internal class SymbolicExecutor(
     /** Reads `this.<name>` of a class-compiled lambda. */
     private val thisField: ((name: String, descriptor: String) -> LExpr)? = null,
     private val maxPaths: Int = 1024,
+    /** The constants of enum class `owner` (internal name), in ordinal order; for enum switches. */
+    private val enumConstants: (owner: String) -> List<Any>? = { null },
 ) {
     /** Stack and local values: an expression, or one of the internal markers. */
     private sealed interface V {
@@ -54,6 +68,13 @@ internal class SymbolicExecutor(
         data object This : V
         /** Result of `lcmp`/`fcmpl`/`dcmpg`..., only meaningful to a following `if<cond>`. */
         data class Cmp3(val left: LExpr, val right: LExpr) : V
+        /** An array literal being filled; mutable, and shared by every stack slot that holds it. */
+        class Arr(val type: String, val elements: Array<LExpr?>) : V
+        /**
+         * `mapping[e.ordinal()]` with the compiler's switch-map array: the key of an enum switch.
+         * [owner] is the enum class.
+         */
+        class EnumKey(val enumValue: LExpr, val mapping: IntArray, val owner: String) : V
     }
 
     private sealed interface Tree {
@@ -62,10 +83,33 @@ internal class SymbolicExecutor(
         data object Unreachable : Tree
     }
 
-    private class State(val stack: ArrayList<V>, val locals: HashMap<Int, V>) {
-        fun copy() = State(ArrayList(stack), HashMap(locals))
+    private class State(
+        val stack: ArrayList<V>,
+        val locals: HashMap<Int, V>,
+        /** Conditions this path already decided (a switch case, an earlier branch), with their value. */
+        val known: HashMap<LExpr, Boolean> = HashMap(),
+    ) {
+        /** A copy for one branch; array literals are copied too (keeping aliasing), as later stores differ per path. */
+        fun copy(): State {
+            val arrays = java.util.IdentityHashMap<V.Arr, V.Arr>()
+            fun c(v: V): V = if (v is V.Arr) arrays.getOrPut(v) { V.Arr(v.type, v.elements.copyOf()) } else v
+            return State(ArrayList(stack.map(::c)), HashMap(locals.mapValues { c(it.value) }), HashMap(known))
+        }
         fun push(v: V) { stack.add(v) }
         fun pop(): V = stack.removeLast()
+
+        fun assume(cond: LExpr, value: Boolean): State {
+            known[cond] = value
+            known[Simplify.not(cond)] = !value
+            return this
+        }
+
+        /** [cond] with what this path knows: TRUE or FALSE when decided, else itself. */
+        fun decide(cond: LExpr): LExpr = when (known[cond]) {
+            true -> LExpr.TRUE
+            false -> LExpr.FALSE
+            null -> cond
+        }
     }
 
     private val elements: List<CodeElement> = code.elementList()
@@ -122,6 +166,23 @@ internal class SymbolicExecutor(
                 }
                 is InvokeDynamicInstruction -> s.push(V.E(invokeDynamic(el, s)))
                 is NewObjectInstruction -> s.push(V.Uninit(el.className().asInternalName()))
+                is NewReferenceArrayInstruction -> s.push(newArray("[" + el.componentType().asSymbol().descriptorString(), s))
+                is NewPrimitiveArrayInstruction -> s.push(newArray("[" + el.typeKind().upperBound().descriptorString().let {
+                    when (el.typeKind()) {
+                        TypeKind.BOOLEAN -> "Z"; TypeKind.BYTE -> "B"; TypeKind.CHAR -> "C"; TypeKind.SHORT -> "S"
+                        else -> it
+                    }
+                }, s))
+                is ArrayStoreInstruction -> {
+                    val value = expr(s.pop())
+                    val index = constIndex(s.pop())
+                    val arr = s.pop() as? V.Arr ?: fail("arrays are not translatable (store into a non-literal array)")
+                    if (index !in arr.elements.indices) fail("array index $index out of bounds")
+                    arr.elements[index] = coerce(value, arr.type.substring(1))
+                }
+                is ArrayLoadInstruction -> s.push(arrayLoad(s))
+                is TableSwitchInstruction -> return switch(pc, s, el.cases(), el.defaultTarget())
+                is LookupSwitchInstruction -> return switch(pc, s, el.cases(), el.defaultTarget())
                 is BranchInstruction -> {
                     val target = labels[el.target()] ?: fail("branch to unknown label")
                     if (target <= pc) fail("loops are not translatable")
@@ -130,10 +191,10 @@ internal class SymbolicExecutor(
                         continue
                     }
                     val cond = branchCondition(el.opcode(), s)
-                    return when (cond) {
+                    return when (s.decide(cond)) {
                         LExpr.TRUE -> exec(target, s)
                         LExpr.FALSE -> exec(pc + 1, s)
-                        else -> Tree.Branch(cond, exec(target, s.copy()), exec(pc + 1, s))
+                        else -> Tree.Branch(cond, exec(target, s.copy().assume(cond, true)), exec(pc + 1, s.assume(cond, false)))
                     }
                 }
                 is ReturnInstruction -> {
@@ -157,6 +218,116 @@ internal class SymbolicExecutor(
         is V.Uninit -> fail("use of an object before its constructor ran")
         V.This -> fail("the lambda object itself is not translatable")
         is V.Cmp3 -> fail("a three-way comparison result is only translatable inside a condition")
+        is V.Arr -> LExpr.ArrayOf(v.elements.map { it ?: defaultOf(v.type.substring(1)) }, v.type)
+        is V.EnumKey -> fail("an enum switch key is only translatable in its switch")
+    }
+
+    private fun defaultOf(type: String): LExpr = when (type) {
+        "Z" -> LExpr.FALSE
+        "J" -> LExpr.Const(0L, "J")
+        "F" -> LExpr.Const(0f, "F")
+        "D" -> LExpr.Const(0.0, "D")
+        "I", "S", "B", "C" -> LExpr.Const(0, "I")
+        else -> LExpr.Const(null, type)
+    }
+
+    private fun constIndex(v: V): Int =
+        ((v as? V.E)?.e as? LExpr.Const)?.value as? Int ?: fail("arrays are not translatable (non-constant index or size)")
+
+    private fun newArray(type: String, s: State): V.Arr {
+        val size = constIndex(s.pop())
+        if (size < 0 || size > 1024) fail("array literal of size $size is not translatable")
+        return V.Arr(type, arrayOfNulls(size))
+    }
+
+    private fun arrayLoad(s: State): V {
+        val index = s.pop()
+        val array = s.pop()
+        if (array is V.Arr) return V.E(array.elements.getOrNull(constIndex(index)) ?: defaultOf(array.type.substring(1)))
+        // the enum switch map: getstatic X$WhenMappings.$EnumSwitchMapping$0 / X$1.$SwitchMap$...; e.ordinal(); iaload
+        val mapping = ((array as? V.E)?.e as? LExpr.Const)?.value as? IntArray
+        val ordinal = (index as? V.E)?.e as? LExpr.Invoke
+        if (mapping != null && ordinal != null && ordinal.name == "ordinal" && ordinal.args.isEmpty() && ordinal.receiver != null) {
+            return V.EnumKey(ordinal.receiver, mapping, ordinal.owner)
+        }
+        fail("arrays are not translatable")
+    }
+
+    /**
+     * A `tableswitch`/`lookupswitch` at [pc]: one path per case, tried in order, then the default.
+     * Each case's condition is what the switch key means for it (see [caseCondition]).
+     */
+    private fun switch(pc: Int, s: State, cases: List<SwitchCase>, default: Label): Tree {
+        val key = s.pop()
+        fun target(l: Label): Int = (labels[l] ?: fail("branch to unknown label")).also { if (it <= pc) fail("loops are not translatable") }
+        val defaultPc = target(default)
+        // a key known on this path (Java's second switch over the String case index) picks its case
+        if (key is V.E && key.e is LExpr.Const) {
+            val k = key.e.value as? Int ?: fail("switch on a non-int constant")
+            return exec(cases.firstOrNull { it.caseValue() == k }?.let { target(it.target()) } ?: defaultPc, s)
+        }
+        val arms = cases.map { c -> caseCondition(key, c.caseValue(), target(c.target())) to target(c.target()) }
+        fun chain(i: Int, rest: State): Tree {
+            if (i == arms.size) return exec(defaultPc, rest)
+            val (cond, t) = arms[i]
+            return when (rest.decide(cond)) {
+                LExpr.FALSE -> chain(i + 1, rest)
+                LExpr.TRUE -> exec(t, rest)
+                else -> Tree.Branch(cond, exec(t, rest.copy().assumeCase(cond)), chain(i + 1, rest.assume(cond, false)))
+            }
+        }
+        return chain(0, s)
+    }
+
+    /** `mapping[e.ordinal()] op k`, for == and != only. */
+    private fun enumKeyCompare(op: CmpOp, key: V.EnumKey, k: Int): LExpr = when (op) {
+        CmpOp.EQ -> caseCondition(key, k, -1)
+        CmpOp.NE -> Simplify.not(caseCondition(key, k, -1))
+        else -> fail("ordering comparison of an enum switch key is not translatable")
+    }
+
+    /** A case taken: its condition holds, and so does each literal comparison when it is the only one. */
+    private fun State.assumeCase(cond: LExpr): State {
+        assume(cond, true)
+        return this
+    }
+
+    /** When the switch on [key] takes case [value], whose code starts at [targetPc]. */
+    private fun caseCondition(key: V, value: Int, targetPc: Int): LExpr = when {
+        key is V.EnumKey -> {
+            val constants = enumConstants(key.owner) ?: fail("enum ${key.owner.replace('/', '.')} not found for a switch")
+            key.mapping.indices.filter { key.mapping[it] == value && it < constants.size }
+                .map { Simplify.compare(CmpOp.EQ, key.enumValue, LExpr.Const(constants[it], "L${key.owner};")) }
+                .fold(LExpr.FALSE as LExpr) { acc, c -> Simplify.or(acc, c) }
+        }
+        // javac switches on `ordinal()` itself when the enum is compiled with the switch
+        key is V.E && key.e is LExpr.Invoke && key.e.name == "ordinal" && key.e.args.isEmpty() && key.e.receiver != null &&
+            enumConstants(key.e.owner) != null -> {
+            val constants = enumConstants(key.e.owner)!!
+            if (value in constants.indices) Simplify.compare(CmpOp.EQ, key.e.receiver, LExpr.Const(constants[value], "L${key.e.owner};"))
+            else LExpr.FALSE
+        }
+        key is V.E && key.e is LExpr.Invoke && key.e.name == "hashCode" && key.e.args.isEmpty() &&
+            key.e.owner == "java/lang/String" && key.e.receiver != null -> stringCase(key.e.receiver, value, targetPc)
+        else -> Simplify.compare(CmpOp.EQ, expr(key), LExpr.Const(value, "I"))
+    }
+
+    /**
+     * A case of a String switch: kotlinc and javac switch on `hashCode()` and start each case with
+     * `s.equals("literal")`, falling through to the default when it fails. The case therefore means
+     * "s is one of the literals with this hash"; anything else (a hand-written switch on a hash) is
+     * refused, because a hash cannot be computed in a query.
+     */
+    private fun stringCase(subject: LExpr, hash: Int, targetPc: Int): LExpr {
+        val first = elements.drop(targetPc).filterIsInstance<Instruction>().take(3)
+        val ok = first.size == 3 && first[0] is LoadInstruction &&
+            ((first[1] as? ConstantInstruction)?.constantValue() as? String)?.hashCode() == hash &&
+            (first[2] as? InvokeInstruction)?.let { it.name().equalsString("equals") && it.owner().asInternalName() == "java/lang/String" } == true
+        if (!ok) fail("a switch on String.hashCode() is only translatable as a when/switch on the string")
+        val literals = elements.filterIsInstance<ConstantInstruction>().mapNotNull { it.constantValue() as? String }
+            .filter { it.hashCode() == hash }.distinct()
+        return literals.map { Simplify.compare(CmpOp.EQ, subject, LExpr.Const(it, "Ljava/lang/String;")) }
+            .reduce { a, b -> Simplify.or(a, b) }
     }
 
     private fun constant(el: ConstantInstruction): LExpr {
@@ -203,7 +374,11 @@ internal class SymbolicExecutor(
                 s.push(V.E(LExpr.Neg(expr(s.pop()), type)))
                 return
             }
-            Opcode.ARRAYLENGTH -> fail("arrays are not translatable")
+            Opcode.ARRAYLENGTH -> {
+                val a = s.pop() as? V.Arr ?: fail("arrays are not translatable")
+                s.push(V.E(LExpr.Const(a.elements.size, "I")))
+                return
+            }
             else -> {}
         }
         val bin = when (op.name.substring(1)) {
@@ -322,13 +497,21 @@ internal class SymbolicExecutor(
                 val cmp = cmpOf(op.name.substring(2))
                 when (val v = s.pop()) {
                     is V.Cmp3 -> Simplify.compare(cmp, v.left, v.right)
+                    is V.EnumKey -> enumKeyCompare(cmp, v, 0)
                     else -> Simplify.compare(cmp, expr(v), zero())
                 }
             }
             Opcode.IF_ICMPEQ, Opcode.IF_ICMPNE, Opcode.IF_ICMPLT, Opcode.IF_ICMPGE, Opcode.IF_ICMPGT, Opcode.IF_ICMPLE,
             Opcode.IF_ACMPEQ, Opcode.IF_ACMPNE -> {
-                val r = expr(s.pop()); val l = expr(s.pop())
-                Simplify.compare(cmpOf(op.name.substring(7)), l, r)
+                val rv = s.pop(); val lv = s.pop()
+                val cmp = cmpOf(op.name.substring(7))
+                fun constant(v: V) = ((v as? V.E)?.e as? LExpr.Const)?.value as? Int
+                when {
+                    // a `when` on an enum with one case compiles to `mapping[e.ordinal()] == k`
+                    lv is V.EnumKey && constant(rv) != null -> enumKeyCompare(cmp, lv, constant(rv)!!)
+                    rv is V.EnumKey && constant(lv) != null -> enumKeyCompare(cmp.flip(), rv, constant(lv)!!)
+                    else -> Simplify.compare(cmp, expr(lv), expr(rv))
+                }
             }
             else -> fail("${op.name.lowercase()} is not translatable")
         }

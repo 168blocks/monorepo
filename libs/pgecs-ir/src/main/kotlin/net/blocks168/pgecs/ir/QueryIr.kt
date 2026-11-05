@@ -147,6 +147,17 @@ object Arguments {
             require(type.nullable) { "argument $index is null, but parameter type $type is not nullable" }
             return
         }
+        if (type.list) {
+            val items = (value as? Collection<*>) ?: (value as? Array<*>)?.asList()
+            require(items != null) { "argument $index (${value::class.java.name}) is not a list, parameter type $type" }
+            items.forEachIndexed { i, item ->
+                require(item != null) { "argument $index: element $i is null; list parameters hold non-null values" }
+                require(runCatching { Expr.Literal(normalize(item), type.element()) }.isSuccess) {
+                    "argument $index: element $i (${item::class.java.name}) does not fit $type"
+                }
+            }
+            return
+        }
         val ok = when (type.kind) {
             ValueType.Kind.JSON -> true // encoded by the component's serializer at execution
             else -> runCatching { Expr.Literal(normalize(value), type.asNonNull()) }.isSuccess

@@ -89,9 +89,40 @@ internal object Simplify {
         return LExpr.Compare(op, l, r)
     }
 
+    /** Factories of collection literals: owner/name to the literal's type (list or set). */
+    private val FACTORIES = mapOf(
+        "kotlin/collections/CollectionsKt" to mapOf(
+            "listOf" to LExpr.LIST_TYPE, "mutableListOf" to LExpr.LIST_TYPE, "arrayListOf" to LExpr.LIST_TYPE,
+            "emptyList" to LExpr.LIST_TYPE,
+        ),
+        "kotlin/collections/SetsKt" to mapOf(
+            "setOf" to LExpr.SET_TYPE, "mutableSetOf" to LExpr.SET_TYPE, "hashSetOf" to LExpr.SET_TYPE,
+            "linkedSetOf" to LExpr.SET_TYPE, "emptySet" to LExpr.SET_TYPE,
+        ),
+        "java/util/List" to mapOf("of" to LExpr.LIST_TYPE),
+        "java/util/Set" to mapOf("of" to LExpr.SET_TYPE),
+        "java/util/Arrays" to mapOf("asList" to LExpr.LIST_TYPE),
+    )
+
+    /**
+     * `listOf("a", "b")` and friends as a [LExpr.CollectionOf]: one array argument (varargs), or
+     * the elements themselves (`listOf(x)`, `List.of(a, b)`), or none.
+     */
+    private fun collection(c: LExpr.Invoke): LExpr? {
+        if (c.receiver != null) return null
+        val type = FACTORIES[c.owner]?.get(c.name) ?: return null
+        val elements = when {
+            c.args.size == 1 && c.args[0] is LExpr.ArrayOf -> (c.args[0] as LExpr.ArrayOf).elements
+            c.args.none { it.type.startsWith("[") } -> c.args
+            else -> return null
+        }
+        return LExpr.CollectionOf(elements, type)
+    }
+
     /** Rewrites calls that are only Kotlin/JVM plumbing. */
     fun call(c: LExpr.Invoke): LExpr {
         val n = c.args.size
+        collection(c)?.let { return it }
         when {
             (c.owner == SymbolicExecutor.KOTLIN_INTRINSICS && c.name == "areEqual" && n == 2) ||
                 (c.owner == "java/util/Objects" && c.name == "equals" && n == 2) ->

@@ -56,6 +56,18 @@ enum class Fn(val kind: Kind?) {
     ABS(null),
     COALESCE(null),
     CONCAT(Kind.STRING),
+
+    /** `text ~ pattern`, PostgreSQL regular expressions. */
+    REGEX(Kind.BOOLEAN),
+
+    /** A JSON array contains a scalar: `array @> jsonb_build_array(x)`. */
+    JSON_CONTAINS(Kind.BOOLEAN),
+
+    /** Length of a JSON array, null for anything else. */
+    JSON_SIZE(Kind.LONG),
+
+    /** Element of a JSON array at a non-negative index, read as the call's kind; null out of range. */
+    JSON_GET(null),
 }
 
 enum class ArithOp(val sql: String) { ADD("+"), SUB("-"), MUL("*"), DIV("/"), REM("%") }

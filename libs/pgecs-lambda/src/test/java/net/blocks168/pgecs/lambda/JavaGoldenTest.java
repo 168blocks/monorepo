@@ -10,6 +10,10 @@ import org.junit.jupiter.api.Test;
 class JavaGoldenTest {
     record Mail(String address, Instant verifiedAt, int score) {}
 
+    enum Level { LOW, HIGH }
+
+    record Entry(String name, Level level, int n) {}
+
     private static <T> String pred(QueryPredicate<T> p) {
         return LExprKt.render(LambdaDecompiler.INSTANCE.decompile(p).getBody());
     }
@@ -61,5 +65,29 @@ class JavaGoldenTest {
         assertEquals(
             "(if (arg0.score() <= 0) then \"none\" else arg0.address())",
             JavaGoldenTest.<Mail, String>fn(m -> m.score() > 0 ? m.address() : "none"));
+    }
+
+    @Test
+    void stringSwitch() {
+        assertEquals(
+            "(if (arg0.name() == \"a\") then 1 else (if (arg0.name() == \"b\") then 2 else 0))",
+            JavaGoldenTest.<Entry, Integer>fn(e -> switch (e.name()) { case "a" -> 1; case "b" -> 2; default -> 0; }));
+    }
+
+    @Test
+    void enumAndIntSwitch() {
+        assertEquals(
+            "(if (arg0.level() == const(JavaGoldenTest$Level)) then 1 else 2)",
+            JavaGoldenTest.<Entry, Integer>fn(e -> switch (e.level()) { case LOW -> 1; case HIGH -> 2; }));
+        assertEquals(
+            "(if (arg0.n() == 1) then \"one\" else (if (arg0.n() == 7) then \"seven\" else \"many\"))",
+            JavaGoldenTest.<Entry, String>fn(e -> switch (e.n()) { case 1 -> "one"; case 7 -> "seven"; default -> "many"; }));
+    }
+
+    @Test
+    void collectionLiterals() {
+        assertEquals("listOf(\"a\", \"b\").contains(arg0.name())", JavaGoldenTest.<Entry>pred(e -> List.of("a", "b").contains(e.name())));
+        assertEquals("setOf(\"a\").contains(arg0.name())", JavaGoldenTest.<Entry>pred(e -> java.util.Set.of("a").contains(e.name())));
+        assertEquals("listOf(\"x\", \"y\").contains(arg0.name())", JavaGoldenTest.<Entry>pred(e -> java.util.Arrays.asList("x", "y").contains(e.name())));
     }
 }
