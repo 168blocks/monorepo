@@ -473,7 +473,7 @@ Row counts per `rel` feed cost estimates, because the single-table layout hides 
 The optimizer runs equality saturation with egglog inside the JVM through [Endive](https://endive.run), so each source can add its own rewrite rules and costs without the planner hard-coding them. Every query shape goes through it, in every process.
 
 - **Why e-graphs.** Virtual and in-memory sources have very different capabilities, such as spatial indexes, per-tick snapshots and archetype scans. Equality saturation applies all rules at once and extracts the cheapest plan, so adding a source only means adding its rules and cost function.
-- **Runtime.** [egglog](https://github.com/egraphs-good/egglog) (Rust, MIT) compiled to `wasm32-wasip1`, run by Endive (a JVM-native Wasm runtime from the Bytecode Alliance, Apache-2.0) with its build-time (AOT) compiler.
+- **Runtime.** [egglog](https://github.com/egraphs-good/egglog) (Rust, MIT) compiled to `wasm32-wasip1`, run by Endive (a JVM-native Wasm runtime from the Bytecode Alliance, Apache-2.0). Default backend: Endive's experimental Redline, which compiles egglog to native code with Cranelift at build time (in Nix, for Linux x86_64 and aarch64) and loads it through Panama; no JVM warm-up, ~15 ms per optimisation of the spike's 4-way join. Fallback where native code is unavailable: Endive's build-time (AOT) bytecode compiler, as below (#65).
 - **Interface.** The logical plan is serialized as egglog terms. Rules are written in egglog: a core set from pgecs, and one set per source (for example, Minecraft `near` pushdown or bind-join preferences). Per-source cost estimates drive extraction, and the extracted term is parsed back into the plan.
 - **Off the game thread.** Optimisation always runs on a pgecs compile executor, never on a game thread. A new shape reached through `txAsync` / `readAsync` compiles in the background and its future completes afterwards. A blocking call on a non-game thread waits for the compile.
 - **Bounded.** The core rules (`libs/pgecs-query`, `opt/core.egg`) rewrite predicates only: boolean simplification, De Morgan, negation into comparisons, contradictions only for predicates that are never null, removal of probes that a scan already guarantees, and merging probes of one entity into `rel in (...)`. They run as `(repeat 8 (run core))`, not to saturation. A compile waits at most 250 ms for egglog; after that it uses the Kotlin simplifier's plan (the same rules as a fixed-point pass) and swaps in egglog's plan when it arrives. If egglog cannot run at all, the simplifier's plan stays. egglog's text interface only extracts with static costs, so join order is chosen in Kotlin, not by extraction.
@@ -686,11 +686,11 @@ ecs.readAsync { q.fetch() }.thenAccept { ids -> server.execute { show(ids) } }
 | `pgecs-postgres` | Base schema, triggers, freeze, SQL compiler, tx runner, outbox worker |
 | `pgecs-lambda` | Bytecode decompiler for lambdas (Java classfile API) |
 | `pgecs-ksp` | KSP processor: module registries, infix relations, write accessors |
-| `pgecs-eqsat` | egglog compiled to `wasm32-wasip1`, run by Endive AOT, run by `libs/pgecs-query` with its core rules (`libs/pgecs-eqsat`) |
+| `pgecs-eqsat` | egglog compiled to `wasm32-wasip1`, run by Endive as Redline native code (bytecode AOT as fallback), run by `libs/pgecs-query` with its core rules (`libs/pgecs-eqsat`) |
 | `pgecs-fabric` | Minecraft source, game-thread registration, endpoints per `MinecraftServer`, presence |
 | `pgecs-memory` | Ephemeral in-memory archetype ECS (later) |
 
-Endive's build-time compiler has an official Maven plugin. Under Gradle, `libs/pgecs-eqsat` runs its `GeneratorMain` from a small `JavaExec` task (`compileEgglog`), on an egglog wasm built by Nix (`nix/egglog-wasm.nix`).
+Endive's build-time compiler has an official Maven plugin. Under Gradle, `libs/pgecs-eqsat` runs its `GeneratorMain` from a small `JavaExec` task (`compileEgglog`), on an egglog wasm built by Nix (`nix/egglog-wasm.nix`), for the bytecode fallback. The native module comes from Endive's Redline generator, run by Nix (`nix/egglog-redline.nix`, ~23 min, cached in the Nix store) on an opt-level 3 build of the same crate.
 
 ## Phasing
 
