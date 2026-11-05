@@ -61,7 +61,12 @@ pgecs). Java 25 is the minimum: Minecraft 26.3 and Velocity 4.3 require it.
   `deploy/fabric/survival/world/datapacks/blocks168-spawn`, #53): with C2ME's chunk system, finding a
   new player's spawn in chunks that still have to load could fail the join.
 * **Creative testing servers**: one per player (they can invite others), several `MinecraftServer`
-  instances in one JVM, started and stopped quickly. Not created yet (GitHub issue).
+  instances in one JVM, started and stopped quickly (#6). `mods/creative-host` starts them in the host
+  server's JVM: each has its own directory, port and world, copied from a pre-generated template, and
+  reuses the host's datapack resources and registries when it selects the same datapacks, so it is ready
+  in 0.2–0.6 s instead of 10+ s for a new process (#88). The fixes for static state shared between the
+  servers (C2ME, worker pools, watchdog, Async) are in `mods/cohost-fixes` (#75). Orchestration (which
+  player gets which server, ports, Velocity registration) is not built yet.
 * **Backend**: Ktor (`backend/`); HTTP API (model in `libs/api`) and the web frontend.
 * **Frontend**: Compose Multiplatform (`frontend/`), web via Kotlin/Wasm, also a desktop build.
 * **PostgreSQL**: everything persistent, through **pgecs** (`libs/pgecs`), a fully ACID persistent
