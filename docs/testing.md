@@ -28,6 +28,23 @@ The build runs 1500 queries with a fixed seed (about a minute). For a longer run
 
 The seed is printed at the end (and in a failure, with `-Ppgecs.fuzz.case=<dataset>:<query>`).
 
+### Observers and the outbox against a model
+
+`ObserverModelTest` (libs/pgecs) runs random transactions (create with value, tag and parent, set,
+remove, remove-then-add, delete with descendants, rollbacks), one writer and then four concurrent
+ones, while a plain and a randomly failing observer run. It keeps a model of what committed and checks
+what the observers were given: every changed entity once per transaction, in commit order, only
+committed transactions, `added`/`removed`/`updated`/`old` as the model says, the failing observer's
+writes rolled back with it, and the final state. `OutboxModelTest` writes random entries (both
+capabilities, targeted or not, some not before a later moment, some rolled back) while every endpoint
+delivers in its own thread and handlers fail at random, and checks that each committed entry ran only
+where it may, never before `notBefore`, and either succeeded exactly once and is gone or failed
+`maxAttempts` times and is dead.
+
+```sh
+./dev ./gradlew :libs:pgecs:test --tests '*ModelTest*' -Ppgecs.model.seed=random -Ppgecs.model.steps=5000
+```
+
 ### Query lambdas against themselves
 
 A query lambda is its own oracle. `:libs:pgecs:generateLambdaFuzz` (source set `src/lambdaFuzzGen`)
