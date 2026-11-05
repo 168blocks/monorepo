@@ -10,6 +10,10 @@ postgresql = "42.7.14"
 junit = "6.1.3"
 tinyjcbor = "1.1.0"
 endive = "1.2.0" # JVM Wasm runtime for egglog (libs/pgecs-eqsat)
+# Matrix bot (backend). The vodozemac JNI library is built by Nix (nix/vodozemac-jni.nix): bump its
+# tag together with trixnity (vodozemac-tag in Trixnity's gradle/libs.versions.toml).
+trixnity = "5.10.1"
+r2dbc-postgresql = "1.1.3.RELEASE"
 
 # Minecraft / Fabric
 minecraft = "26.3"
@@ -43,6 +47,7 @@ loom-gradle-plugin = { module = "net.fabricmc:fabric-loom", version.ref = "loom"
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 
+ktor-bom = { module = "io.ktor:ktor-bom", version.ref = "ktor" }
 ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }
 ktor-server-netty = { module = "io.ktor:ktor-server-netty", version.ref = "ktor" }
 ktor-server-content-negotiation = { module = "io.ktor:ktor-server-content-negotiation", version.ref = "ktor" }
@@ -60,6 +65,12 @@ tinyjcbor = { module = "dev.vxcc:tinyjcbor", version.ref = "tinyjcbor" }
 endive-runtime = { module = "run.endive:runtime", version.ref = "endive" }
 endive-wasi = { module = "run.endive:wasi", version.ref = "endive" }
 endive-build-time-compiler = { module = "run.endive:build-time-compiler", version.ref = "endive" }
+
+trixnity-bom = { module = "de.connect2x.trixnity:trixnity-bom", version.ref = "trixnity" }
+trixnity-client = { module = "de.connect2x.trixnity:trixnity-client" }
+trixnity-client-cryptodriver-vodozemac = { module = "de.connect2x.trixnity:trixnity-client-cryptodriver-vodozemac" }
+trixnity-client-repository-exposed = { module = "de.connect2x.trixnity:trixnity-client-repository-exposed" }
+r2dbc-postgresql = { module = "org.postgresql:r2dbc-postgresql", version.ref = "r2dbc-postgresql" }
 
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }

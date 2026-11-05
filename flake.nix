@@ -38,6 +38,10 @@
 
       # egglog as wasm32-wasip1 for libs/pgecs-eqsat (Endive compiles it to JVM classes)
       egglogWasmFor = pkgs: (pkgs.extend rust-overlay.overlays.default).callPackage ./nix/egglog-wasm.nix { };
+
+      # vodozemac's JNI library for Trixnity (backend Matrix bot, end-to-end encryption), built against
+      # the same glibc as Nix's JDK instead of Trixnity's prebuilt one
+      vodozemacJniFor = pkgs: pkgs.callPackage ./nix/vodozemac-jni.nix { };
     in
     {
       devShells = forAllSystems (
@@ -78,6 +82,9 @@
               export BLOCKS_BINARYEN=${pkgs.binaryen}
               export BLOCKS_BASH=${pkgs.bashInteractive}/bin/bash
               export BLOCKS_EGGLOG_WASM=${egglogWasmFor pkgs}/egglog.wasm
+              export BLOCKS_VODOZEMAC_JNI=${vodozemacJniFor pkgs}
+              # throwaway Matrix homeserver for the backend's Matrix bot tests (TestHomeserver)
+              export BLOCKS_MATRIX_TEST_HOMESERVER=${pkgs.matrix-tuwunel}/bin/tuwunel
               # per-checkout slot, ports and compose project (several worktrees side by side)
               if root=$(git rev-parse --show-toplevel 2>/dev/null) && [ -f "$root/tools/instance.sh" ]; then
                 BLOCKS_ROOT=$root . "$root/tools/instance.sh"
@@ -96,6 +103,8 @@
           postgresql = postgresFor pkgs;
 
           egglog-wasm = egglogWasmFor pkgs;
+
+          vodozemac-jni = vodozemacJniFor pkgs;
 
           # PostgreSQL with pg_jsonschema for deploy/compose.yaml (the official image lacks the extension)
           postgres-image = pkgs.dockerTools.buildLayeredImage {

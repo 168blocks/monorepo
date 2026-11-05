@@ -109,7 +109,7 @@ Do not hard-code ports, container or project names in new scripts or tests: take
 | `velocity/<name>` | Velocity plugins (Kotlin, fat jar via `pluginJar`) |
 | `deploy/` | podman compose network (`compose.yaml`) and the Gradle task that stages it (`:deploy:stage`) |
 | `e2e/` | End-to-end tests against the running network |
-| `docs/` | `architecture.md`, `testing.md`, `pgecs.md` (pgecs design) |
+| `docs/` | `architecture.md`, `testing.md`, `pgecs.md` (pgecs design), `matrix-bot.md` (backend Matrix bot) |
 
 New module: add it to `settings.gradle.kts`, apply the matching convention plugin, and (for mods and
 plugins that run in the network) add it to `deploy/build.gradle.kts`.
