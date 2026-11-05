@@ -20,7 +20,7 @@
   bashInteractive,
   egglogWasm,
   egglogRedline,
-  vodozemacJni,
+  vodozemacWasm,
   matrix-tuwunel,
   writeShellScript,
   cacert,
@@ -116,8 +116,9 @@ let
         # libs/pgecs-eqsat compiles egglog (nix/egglog-wasm.nix) to JVM classes
         BLOCKS_EGGLOG_WASM = "${egglogWasm}/egglog.wasm";
         BLOCKS_EGGLOG_REDLINE = "${egglogRedline}";
-        # backend's Matrix bot: vodozemac's JNI library, and the tests' throwaway homeserver
-        BLOCKS_VODOZEMAC_JNI = "${vodozemacJni}";
+        # libs/vodozemac-endive compiles vodozemac (nix/vodozemac-wasm.nix) to JVM classes
+        BLOCKS_VODOZEMAC_WASM = "${vodozemacWasm}/vodozemac.wasm";
+        # backend's Matrix bot tests: the throwaway homeserver
         BLOCKS_MATRIX_TEST_HOMESERVER = "${testHomeserver}";
       };
 
