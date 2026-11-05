@@ -28,6 +28,27 @@ The build runs 1500 queries with a fixed seed (about a minute). For a longer run
 
 The seed is printed at the end (and in a failure, with `-Ppgecs.fuzz.case=<dataset>:<query>`).
 
+### Query lambdas against themselves
+
+A query lambda is its own oracle. `:libs:pgecs:generateLambdaFuzz` (source set `src/lambdaFuzzGen`)
+writes random predicates over a record (`FuzzRec`) as Kotlin source into the test source set: nested
+`&&`/`||`/`!`, `if` and `when` (on ints, strings, enums), Int/Long arithmetic, string functions and
+templates, `?:`, null checks and smart casts, `in` on literals and captured collections, list fields,
+regular expressions and instants. `LambdaDifferentialTest` runs each one directly on the records and,
+decompiled and lowered, as a query on the same records in PostgreSQL, and fails on any record where
+they disagree, or a predicate that does not translate.
+
+```sh
+./dev ./gradlew :libs:pgecs:test --tests '*LambdaDifferentialTest*' \
+  -Ppgecs.lambda.seed=1 -Ppgecs.lambda.count=5000 -Ppgecs.lambda.report=/tmp/lambda-report.txt
+```
+
+Known differences the generator leaves out on purpose: Int and Long arithmetic wraps around in Kotlin,
+while SQL's bigint is wider and raises an error on overflow; Kotlin orders strings by UTF-16 code units,
+PostgreSQL's `"C"` collation by code point, which differs for U+E000..U+FFFF against non-BMP
+characters; and regular expressions are PostgreSQL's (`\s` includes NBSP there). Predicates with more
+than 1024 paths (the decompiler's limit) are counted, not checked.
+
 ## End-to-end tests of the network
 
 Goal: tests that read like what a player and an operator would check, against the real network

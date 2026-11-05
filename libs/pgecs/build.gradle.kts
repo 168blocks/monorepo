@@ -34,7 +34,25 @@ tasks.withType<Test>().configureEach {
     for (name in listOf("seed", "steps")) {
         providers.gradleProperty("pgecs.model.$name").orNull?.let { systemProperty("pgecs.model.$name", it) }
     }
+    // LambdaDifferentialTest: -Ppgecs.lambda.report=<file> writes every problem there
+    providers.gradleProperty("pgecs.lambda.report").orNull?.let { systemProperty("pgecs.lambda.report", it) }
 }
 
 // pgecs is published apart from the b8 code (dev.vxcc.b8, gradle.properties)
 group = "dev.vxcc.alexs168"
+
+// ---- generated predicates for the lambda differential test (LambdaDifferentialTest, issue #74)
+val lambdaFuzzGen: SourceSet by sourceSets.creating
+val generateLambdaFuzz by tasks.registering(JavaExec::class) {
+    description = "Writes random query predicates for LambdaDifferentialTest (-Ppgecs.lambda.seed, -Ppgecs.lambda.count)"
+    classpath = lambdaFuzzGen.runtimeClasspath
+    mainClass.set("dev.vxcc.alexs168.pgecs.lambdafuzz.GenerateKt")
+    val out = layout.buildDirectory.dir("generated/lambda-fuzz")
+    val seed = providers.gradleProperty("pgecs.lambda.seed").orElse("74")
+    val count = providers.gradleProperty("pgecs.lambda.count").orElse("600")
+    inputs.property("seed", seed)
+    inputs.property("count", count)
+    outputs.dir(out)
+    argumentProviders += CommandLineArgumentProvider { listOf(out.get().asFile.path, seed.get(), count.get()) }
+}
+kotlin.sourceSets.named("test") { kotlin.srcDir(generateLambdaFuzz) }
