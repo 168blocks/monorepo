@@ -393,7 +393,7 @@ class EcsTest {
 
     @Test
     fun `unique lambdas render exactly what queries use`() {
-        assertEquals(listOf(IndexSpec("address", listOf("(lower(value->>'address'))"), unique = true)), MailComponent.indexes)
+        assertEquals(listOf(IndexSpec("address", listOf("(lower((value->>'address') collate pg_unicode_fast))"), unique = true)), MailComponent.indexes)
         val addr = "Idx${UUID.randomUUID()}@x"
         val plan = ecs.read {
             val q = query {
