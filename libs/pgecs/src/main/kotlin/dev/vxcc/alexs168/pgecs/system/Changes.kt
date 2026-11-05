@@ -60,8 +60,15 @@ class EntityChange internal constructor(
     /** Whether the transaction removed [type] (a pair of it, for a relation) that the entity had before. */
     fun removed(type: ComponentType): Boolean = perKey(type).any { it.first().op != ChangeOp.INSERT && it.last().op == ChangeOp.DELETE }
 
-    /** Whether the transaction changed the value of [type] that the entity had before and still has. */
-    fun updated(type: ComponentType): Boolean = perKey(type).any { it.first().op == ChangeOp.UPDATE && it.last().op != ChangeOp.DELETE }
+    /**
+     * Whether the transaction changed the value of [type] that the entity had before and still has:
+     * updated it, or removed it and added it again (a value is replaced; a tag that comes back is not
+     * an update).
+     */
+    fun updated(type: ComponentType): Boolean = perKey(type).any { k ->
+        k.first().op != ChangeOp.INSERT && k.last().op != ChangeOp.DELETE &&
+            k.any { it.op == ChangeOp.UPDATE || (it.op == ChangeOp.DELETE && it.oldValue != null) }
+    }
 
     /** Whether any row of [type] changed. */
     fun touched(type: ComponentType): Boolean = rows.any { it.rel == type.name }

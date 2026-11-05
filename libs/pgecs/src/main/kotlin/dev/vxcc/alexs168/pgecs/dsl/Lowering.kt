@@ -33,6 +33,7 @@ import dev.vxcc.alexs168.pgecs.ir.ValueType
 import dev.vxcc.alexs168.pgecs.ir.ValueVar
 import dev.vxcc.alexs168.pgecs.ir.and
 import dev.vxcc.alexs168.pgecs.ir.or
+import dev.vxcc.alexs168.pgecs.ir.transform
 import dev.vxcc.alexs168.pgecs.lambda.BinOp
 import dev.vxcc.alexs168.pgecs.lambda.CmpOp
 import dev.vxcc.alexs168.pgecs.lambda.LExpr
@@ -240,7 +241,51 @@ internal class Lowering(private val q: QueryBuilder) {
     }
 
     /** Where a lowering happens: the lambda (null for builder calls outside lambdas) and its arguments. */
-    private class Ctx(val lambda: LambdaInstance?, val args: List<LV>)
+    /**
+     * [known]: expressions that are not null here, because a guard around this part of the lambda
+     * says so (`x != null && ...`, `x == null || ...`, `if (x != null) ... else ...`, and the paths
+     * the decompiler splits `x ?: d` into). They are narrowed to their non-null type, as Kotlin's
+     * smart casts do, so `x.length`, `"$x"` and `x < 3` are translatable there. In SQL's three-valued
+     * logic this is sound: where the guard is false, `false and null` is `false` and `true or null`
+     * is `true`.
+     */
+    private class Ctx(val lambda: LambdaInstance?, val args: List<LV>, val known: Set<Expr> = emptySet()) {
+        fun knowing(facts: Set<Expr>): Ctx = if (facts.isEmpty()) this else Ctx(lambda, args, known + facts)
+    }
+
+    /** Expressions that are not null where [e] is true. */
+    private fun nonNullIfTrue(e: Expr): Set<Expr> = when (e) {
+        is Expr.Not -> nonNullIfFalse(e.operand)
+        is Expr.And -> e.operands.flatMapTo(LinkedHashSet(), ::nonNullIfTrue)
+        else -> emptySet()
+    }
+
+    /** Expressions that are not null where [e] is false. */
+    private fun nonNullIfFalse(e: Expr): Set<Expr> = when (e) {
+        is Expr.IsNull -> if (e.operand.type.nullable) setOf(e.operand) else emptySet()
+        is Expr.Not -> nonNullIfTrue(e.operand)
+        is Expr.Or -> e.operands.flatMapTo(LinkedHashSet(), ::nonNullIfFalse)
+        else -> emptySet()
+    }
+
+    /** [e] with the [known] non-null expressions (and built-in calls on them) narrowed to non-null types. */
+    private fun narrow(e: Expr, known: Set<Expr>): Expr = e.transform { x ->
+        when {
+            !x.type.nullable -> x
+            x is Expr.Field && x in known -> x.copy(type = x.type.asNonNull())
+            x is Expr.Call && x in known -> x.copy(type = x.type.asNonNull())
+            // a string function of non-null arguments: no longer null (Functions.call types it from them)
+            x is Expr.Call && Functions.signature(x.fn)?.result?.nullable == false && x.args.none { a -> a.type.nullable } ->
+                x.copy(type = x.type.asNonNull())
+            else -> x
+        }
+    }
+
+    private fun narrow(lv: LV, known: Set<Expr>): LV = when {
+        known.isEmpty() -> lv
+        lv is LV.E -> narrow(lv.expr, known).let { n -> if (n == lv.expr) lv else lv.copy(expr = n, maybeNull = lv.maybeNull && n.type.nullable) }
+        else -> lv
+    }
 
     private fun lowerLambda(l: LambdaInstance, args: List<LV>): LV = lower(l.body, Ctx(l, args))
 
@@ -260,7 +305,9 @@ internal class Lowering(private val q: QueryBuilder) {
         )
     }
 
-    private fun lower(e: LExpr, ctx: Ctx): LV = when (e) {
+    private fun lower(e: LExpr, ctx: Ctx): LV = narrow(lower0(e, ctx), ctx.known)
+
+    private fun lower0(e: LExpr, ctx: Ctx): LV = when (e) {
         is LExpr.Arg -> ctx.args.getOrNull(e.index) ?: fail(ctx, "lambda parameter ${e.index} is not bound")
         is LExpr.Captured -> when (val v = ctx.lambda!!.captured[e.index]) {
             null -> LV.Null
@@ -280,8 +327,14 @@ internal class Lowering(private val q: QueryBuilder) {
         is LExpr.ArrayOf -> LV.Coll(e.elements.map { lower(it, ctx) })
         is LExpr.CollectionOf -> LV.Coll(e.elements.map { lower(it, ctx) })
         is LExpr.Compare -> regexFound(e, ctx) ?: compare(e.op, lower(e.left, ctx), lower(e.right, ctx), ctx)
-        is LExpr.And -> LV.E(and(asBool(lower(e.left, ctx), ctx), asBool(lower(e.right, ctx), ctx)))
-        is LExpr.Or -> LV.E(or(asBool(lower(e.left, ctx), ctx), asBool(lower(e.right, ctx), ctx)))
+        is LExpr.And -> {
+            val l = asBool(lower(e.left, ctx), ctx)
+            LV.E(and(l, asBool(lower(e.right, ctx.knowing(nonNullIfTrue(l))), ctx)))
+        }
+        is LExpr.Or -> {
+            val l = asBool(lower(e.left, ctx), ctx)
+            LV.E(or(l, asBool(lower(e.right, ctx.knowing(nonNullIfFalse(l))), ctx)))
+        }
         is LExpr.Not -> LV.E(Expr.Not(asBool(lower(e.operand, ctx), ctx)))
         is LExpr.Binary -> {
             val op = when (e.op) {
@@ -318,8 +371,10 @@ internal class Lowering(private val q: QueryBuilder) {
     }
 
     /** `x ?: d` arrives as `if (x == null) d else x` and becomes `Coalesce`; other ifs become `If`. */
-    private fun conditional(e: LExpr.Cond, ctx: Ctx): LV =
-        choose(asBool(lower(e.condition, ctx), ctx), lower(e.then, ctx), lower(e.otherwise, ctx), ctx)
+    private fun conditional(e: LExpr.Cond, ctx: Ctx): LV {
+        val c = asBool(lower(e.condition, ctx), ctx)
+        return choose(c, lower(e.then, ctx.knowing(nonNullIfTrue(c))), lower(e.otherwise, ctx.knowing(nonNullIfFalse(c))), ctx)
+    }
 
     /**
      * `if (c) then else otherwise`. When both sides construct the same type (`a to when (x) {...}`
@@ -517,7 +572,8 @@ internal class Lowering(private val q: QueryBuilder) {
 
     /** Whitelisted String functions (Java methods and Kotlin's StringsKt). */
     private fun text(c: LExpr.Invoke, recv: LV?, args: List<LV>, ctx: Ctx): LV? {
-        if (c.owner == "java/lang/String" && recv != null) {
+        // String.isEmpty()/isNotEmpty() and `length` through CharSequence compile to CharSequence.length()
+        if ((c.owner == "java/lang/String" || c.owner == "java/lang/CharSequence") && recv != null) {
             val s = textArg(recv, ctx) ?: return null
             return LV.E(
                 when (c.name) {

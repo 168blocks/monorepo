@@ -104,7 +104,7 @@ class GameClient internal constructor(
 
     /**
      * Waits until the client is in a world (optionally [dimension], e.g. `minecraft:overworld`) with its
-     * player, no screen open and (with [rendered]) all visible chunk sections built.
+     * player, no screen open and (with [rendered]) the world around it on screen (see [awaitRendered]).
      */
     fun awaitWorld(dimension: String? = null, rendered: Boolean = true, afterJoins: Int = 0, timeoutMs: Long = 120_000): JsonObject =
         call("awaitWorld", buildJsonObject {
@@ -113,6 +113,44 @@ class GameClient internal constructor(
             put("rendered", rendered)
             put("timeoutMs", timeoutMs)
         }).jsonObject
+
+    /**
+     * Waits until the world around the player is on screen: the chunks within [radius] (default: one
+     * less than the render distance) loaded, their visible sections compiled and faded in, at least
+     * [minSections] sections with geometry, and all that unchanged for [frames] rendered frames. Call it
+     * after anything that changes the view ([look], moving) and before a [screenshot]. Returns the
+     * client's render statistics.
+     */
+    fun awaitRendered(radius: Int? = null, minSections: Int = 1, frames: Int = 5, timeoutMs: Long = 60_000): JsonObject =
+        call("awaitRendered", buildJsonObject {
+            radius?.let { put("radius", it) }
+            put("minSections", minSections)
+            put("frames", frames)
+            put("timeoutMs", timeoutMs)
+        }).jsonObject
+
+    /**
+     * [awaitRendered], then a [screenshot] that is not blank. A blank one is retried (waiting for the
+     * render again) until [timeoutMs] is over; the failure names every attempt with the client's render
+     * statistics, so a flaky blank frame is diagnosable from the test report alone.
+     */
+    fun renderedScreenshot(label: String, minSections: Int = 1, timeoutMs: Long = 60_000): Screenshot {
+        val end = System.currentTimeMillis() + timeoutMs
+        val attempts = mutableListOf<String>()
+        var attempt = 0
+        while (true) {
+            val render = awaitRendered(minSections = minSections, timeoutMs = (end - System.currentTimeMillis()).coerceAtLeast(1000))
+            val shot = screenshot(if (attempt == 0) label else "$label-retry$attempt")
+            if (!shot.isBlank()) return shot
+            attempts += "${shot.file}: ${shot.describe()}; render $render"
+            attempt++
+            if (System.currentTimeMillis() > end) {
+                throw AssertionError("$name: screenshot '$label' stayed blank (${attempts.size} attempts):\n" +
+                    attempts.joinToString("\n") + "\nstatus: ${status()}")
+            }
+            Thread.sleep(500)
+        }
+    }
 
     /** Waits until another entity named [entityName] (e.g. another player) is in the client's world. */
     fun awaitEntity(entityName: String, timeoutMs: Long = 60_000): Position =

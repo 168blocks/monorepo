@@ -35,8 +35,8 @@ include(":velocity:e2e-agent") // dev only: proxy state over HTTP for the e2e te
 // Network
 include(":e2e") // end-to-end tests against the running network
 
-// Modules that need Minecraft: Loom downloads it from Mojang while configuring them. The hermetic Nix
-// build (nix/gradle.nix) passes -Pblocks.minecraft=false to leave them out.
+// Modules that need Minecraft: Loom downloads it from Mojang while configuring them.
+// -Pblocks.minecraft=false leaves them out, for a quicker build of the rest.
 if (providers.gradleProperty("blocks.minecraft").orNull != "false") {
     include(":mods:example-common") // Fabric mod (Kotlin + Java mixins), server and client
     include(":mods:e2e-client") // dev-only client mod: local RPC for end-to-end tests with real game clients

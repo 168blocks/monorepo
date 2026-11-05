@@ -96,7 +96,8 @@
           exec "$@"
         '';
 
-      # hermetic Gradle builds (nix/gradle.nix): backend, frontend-web, velocity-example-plugin, libs
+      # hermetic Gradle builds (nix/gradle.nix): backend, frontend-web, velocity-example-plugin, libs,
+      # mods, fabric-server-launcher
       gradleFor =
         pkgs:
         pkgs.callPackage ./nix/gradle.nix {
@@ -176,6 +177,8 @@
             frontend-web
             velocity-example-plugin
             libs
+            mods
+            fabric-server-launcher
             ;
 
           postgresql = postgresFor pkgs;
@@ -278,7 +281,7 @@
         }
       );
 
-      # `gradlew build` (all unit and integration tests) in the Nix sandbox
+      # `gradlew build` (all unit and integration tests) and `:deploy:stage` in the Nix sandbox
       checks = forAllSystems (pkgs: {
         gradle = (gradleFor pkgs).check;
       });

@@ -64,9 +64,13 @@ class ScenarioClient internal constructor(
 
     suspend fun hud(visible: Boolean) = apply { blocking { client.hud(visible) } }
 
+    /** Waits until the view is rendered ([GameClient.awaitRendered]), then takes a screenshot. */
     suspend fun screenshot(label: String): Screenshot {
         scenario.log("$name: screenshot $label")
-        return blocking { client.screenshot(label) }
+        return blocking {
+            client.awaitRendered()
+            client.screenshot(label)
+        }
     }
 
     override suspend fun diagnostics(out: Diagnostics) {
