@@ -16,6 +16,7 @@ include(":libs:pgecs-ir") // first-level query IR of pgecs (DSL in, planner and 
 include(":libs:pgecs-eqsat") // equality saturation (egglog on Endive) for the pgecs query planner
 include(":libs:pgecs-ksp") // KSP processor: pgecs query infix relations and write accessors
 include(":libs:pgecs-lambda") // bytecode decompiler for pgecs query lambdas (where, select, orderBy, ...)
+include(":libs:pgecs-query") // pgecs query engine: planner, eqsat optimisation, SQL compiler, plan cache
 include(":libs:common") // JVM code shared by all server-side components (CBOR wire format, ...)
 include(":libs:api") // Kotlin Multiplatform backend API model, shared with the frontend
 
@@ -23,14 +24,19 @@ include(":libs:api") // Kotlin Multiplatform backend API model, shared with the 
 include(":backend") // Ktor
 include(":frontend") // Compose Multiplatform (web + desktop)
 
-// Minecraft
-include(":mods:example-common") // Fabric mod (Kotlin + Java mixins), server and client
-include(":mods:e2e-client") // dev-only client mod: local RPC for end-to-end tests with real game clients
+// Velocity plugins
 include(":velocity:example-plugin") // Velocity plugin
 include(":velocity:network") // every edge: online players, cross-edge actions, drain, maintenance
-include(":mods:e2e-agent") // dev only: server state over HTTP for the e2e tests
 include(":velocity:e2e-agent") // dev only: proxy state over HTTP for the e2e tests
 
 // Network
-include(":deploy") // stages the podman compose network (deploy/compose.yaml)
 include(":e2e") // end-to-end tests against the running network
+
+// Modules that need Minecraft: Loom downloads it from Mojang while configuring them. The hermetic Nix
+// build (nix/gradle.nix) passes -Pblocks.minecraft=false to leave them out.
+if (providers.gradleProperty("blocks.minecraft").orNull != "false") {
+    include(":mods:example-common") // Fabric mod (Kotlin + Java mixins), server and client
+    include(":mods:e2e-client") // dev-only client mod: local RPC for end-to-end tests with real game clients
+    include(":mods:e2e-agent") // dev only: server state over HTTP for the e2e tests
+    include(":deploy") // stages the podman compose network (deploy/compose.yaml)
+}

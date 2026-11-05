@@ -39,6 +39,10 @@
       # egglog as wasm32-wasip1 for libs/pgecs-eqsat (Endive compiles it to JVM classes)
       egglogWasmFor = pkgs: (pkgs.extend rust-overlay.overlays.default).callPackage ./nix/egglog-wasm.nix { };
 
+      # vodozemac's JNI library for Trixnity (backend Matrix bot, end-to-end encryption), built against
+      # the same glibc as Nix's JDK instead of Trixnity's prebuilt one
+      vodozemacJniFor = pkgs: pkgs.callPackage ./nix/vodozemac-jni.nix { };
+
       # Environment for the real game clients of the end-to-end tests (e2e/.../client, docs/testing.md):
       # `blocks-client-env <command>` runs <command> with the libraries Minecraft's LWJGL/SDL natives
       # dlopen (glibc builds; a musl host has none of them) and Mesa software rendering (llvmpipe /
@@ -78,6 +82,15 @@
           export XKB_CONFIG_ROOT=${pkgs.xkeyboard-config}/share/X11/xkb
           exec "$@"
         '';
+
+      # hermetic Gradle builds (nix/gradle.nix): backend, frontend-web, velocity-example-plugin, libs
+      gradleFor =
+        pkgs:
+        pkgs.callPackage ./nix/gradle.nix {
+          jdk = jdkFor pkgs;
+          postgresql = postgresFor pkgs;
+          egglogWasm = egglogWasmFor pkgs;
+        };
     in
     {
       devShells = forAllSystems (
@@ -121,6 +134,9 @@
               export BLOCKS_BINARYEN=${pkgs.binaryen}
               export BLOCKS_BASH=${pkgs.bashInteractive}/bin/bash
               export BLOCKS_EGGLOG_WASM=${egglogWasmFor pkgs}/egglog.wasm
+              export BLOCKS_VODOZEMAC_JNI=${vodozemacJniFor pkgs}
+              # throwaway Matrix homeserver for the backend's Matrix bot tests (TestHomeserver)
+              export BLOCKS_MATRIX_TEST_HOMESERVER=${pkgs.matrix-tuwunel}/bin/tuwunel
               export BLOCKS_CLIENT_ENV=${clientEnv}/bin/blocks-client-env
               export BLOCKS_SWAY=${pkgs.sway}/bin/sway
               # per-checkout slot, ports and compose project (several worktrees side by side)
@@ -136,11 +152,21 @@
         pkgs:
         let
           jre = jreFor pkgs;
+          gradle = gradleFor pkgs;
         in
         {
+          inherit (gradle)
+            backend
+            frontend-web
+            velocity-example-plugin
+            libs
+            ;
+
           postgresql = postgresFor pkgs;
 
           egglog-wasm = egglogWasmFor pkgs;
+
+          vodozemac-jni = vodozemacJniFor pkgs;
 
           # PostgreSQL with pg_jsonschema for deploy/compose.yaml (the official image lacks the extension)
           postgres-image = pkgs.dockerTools.buildLayeredImage {
@@ -208,6 +234,19 @@
           };
         }
       );
+
+      # `gradlew build` (all unit and integration tests) in the Nix sandbox
+      checks = forAllSystems (pkgs: {
+        gradle = (gradleFor pkgs).check;
+      });
+
+      # nix run .#update-gradle-deps: re-records nix/gradle-deps.json (run in the repository root)
+      apps = forAllSystems (pkgs: {
+        update-gradle-deps = {
+          type = "app";
+          program = "${(gradleFor pkgs).mitmCache.updateScript}";
+        };
+      });
 
       formatter = forAllSystems (pkgs: pkgs.nixfmt-rfc-style);
     };

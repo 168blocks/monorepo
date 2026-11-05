@@ -86,6 +86,29 @@ other worktrees' running builds.
 Do not hard-code ports, container or project names in new scripts or tests: take them from the
 `BLOCKS_*` variables (`tools/network.sh env`).
 
+## Hermetic Nix build
+
+Besides `./dev ./gradlew ...` (Nix toolchain, Gradle downloads dependencies), the modules that do not
+need Minecraft also build in the Nix sandbox, without network, from locked dependencies
+(`nix/gradle.nix`):
+
+```sh
+nix build .#backend                  # also .#frontend-web, .#velocity-example-plugin, .#libs
+nix flake check                      # `gradlew build` with all tests (.#checks.<system>.gradle)
+nix run .#update-gradle-deps         # re-record nix/gradle-deps.json (from the repository root)
+```
+
+`nix/gradle-deps.json` lists URL and hash of every file Gradle (and yarn, for Kotlin/Wasm) downloads;
+in the sandbox, mitm-cache serves them (nixpkgs `gradle.fetchDeps`). After changing a dependency,
+plugin, Kotlin or Gradle version, run `nix run .#update-gradle-deps` (it runs the whole hermetic build
+with tests) and commit the JSON with the change. Gradle in Nix is nixpkgs' `gradle_9`; keep
+`gradle/wrapper` on the same version.
+
+Not hermetic: `mods/*` and `:deploy`, left out with `-Pblocks.minecraft=false` (`settings.gradle.kts`).
+Fabric Loom downloads Minecraft (version manifest, game jars, libraries) from Mojang while
+*configuring* those projects, and `:deploy` resolves the proxy jar, server launcher and mods from
+PaperMC, Fabric meta and Modrinth. Details: issue #8.
+
 ## Java and Kotlin
 
 * **Java 25** everywhere: Minecraft 26.3 requires it, and Velocity 4.3 (`velocity-api` 4.3.1) is
@@ -110,7 +133,7 @@ Do not hard-code ports, container or project names in new scripts or tests: take
 | `velocity/<name>` | Velocity plugins (Kotlin, fat jar via `pluginJar`); `velocity/network`: every edge (online players, cross-edge actions, drain, maintenance) |
 | `deploy/` | podman compose network (`compose.yaml`, WireGuard peers in `wireguard/peers.toml`) and the Gradle tasks that stage it (`:deploy:stage`, `:deploy:wireguard`) |
 | `e2e/` | End-to-end tests against the running network |
-| `docs/` | `architecture.md`, `testing.md`, `pgecs.md` (pgecs design) |
+| `docs/` | `architecture.md`, `testing.md`, `pgecs.md` (pgecs design), `matrix-bot.md` (backend Matrix bot) |
 
 New module: add it to `settings.gradle.kts`, apply the matching convention plugin, and (for mods and
 plugins that run in the network) add it to `deploy/build.gradle.kts`.

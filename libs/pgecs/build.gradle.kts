@@ -11,6 +11,8 @@ description = "pgecs: a fully ACID, persistent entity component system on top of
 dependencies {
     api(libs.postgresql)
     implementation(libs.hikaricp)
+    // the query engine behind Ecs.query (QueryExecutor)
+    api(project(":libs:pgecs-query"))
     api(libs.kotlinx.coroutines.core)
     api(project(":libs:pgecs-ir"))
     api(project(":libs:pgecs-lambda"))
@@ -21,4 +23,10 @@ dependencies {
     kspTest(project(":libs:pgecs-ksp"))
     testFixturesApi(platform(libs.junit.bom))
     testFixturesApi(libs.junit.jupiter)
+}
+
+tasks.withType<Test>().configureEach {
+    // egglog (through the query engine) has JVM methods above HotSpot's 8000-bytecode limit (libs/pgecs-eqsat/README.md)
+    jvmArgs("-XX:-DontCompileHugeMethods")
+    maxHeapSize = "1g"
 }

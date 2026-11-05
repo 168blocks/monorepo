@@ -22,6 +22,15 @@ dependencies {
     implementation(libs.logback.classic)
     implementation(libs.kord.rest) // Discord bot, src/main/kotlin/.../discord
 
+    // Matrix bot (net.blocks168.backend.matrix): Trixnity with end-to-end encryption, store in PostgreSQL
+    implementation(platform(libs.trixnity.bom))
+    implementation(platform(libs.ktor.bom)) // Trixnity's Ktor modules (auth, ...) at our Ktor version
+    implementation(libs.trixnity.client)
+    implementation(libs.trixnity.client.cryptodriver.vodozemac)
+    implementation(libs.trixnity.client.repository.exposed)
+    implementation(libs.r2dbc.postgresql)
+    implementation(libs.ktor.client.cio)
+
     testImplementation(testFixtures(project(":libs:pgecs")))
     testImplementation(libs.ktor.server.test.host)
     testImplementation(libs.ktor.client.content.negotiation)
@@ -34,4 +43,29 @@ tasks.register<JavaExec>("runDiscordExample") {
     description = "Sends example Discord messages; needs BLOCKS_DISCORD_TOKEN and a channel or user id"
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass.set("net.blocks168.backend.discord.DiscordExampleKt")
+}
+
+// Matrix bot: vodozemac's JNI library comes from Nix (nix/vodozemac-jni.nix, BLOCKS_VODOZEMAC_JNI in the dev
+// shell) instead of Trixnity's prebuilt glibc binaries. Trixnity loads natives/<os>-<arch>/libvodozemac.so
+// from the classpath, so the Nix output goes into this module's resources (and the staged backend's jar).
+configurations.configureEach {
+    exclude(group = "de.connect2x.trixnity", module = "trixnity-vodozemac-binaries")
+    exclude(group = "de.connect2x.trixnity", module = "trixnity-vodozemac-binaries-jvm")
+}
+
+val vodozemacJni: Provider<String> = providers.environmentVariable("BLOCKS_VODOZEMAC_JNI").orElse("")
+
+tasks.processResources {
+    val jni = vodozemacJni
+    // the Nix store is read-only: give the copies normal permissions, or Gradle cannot create the
+    // nested directories inside its read-only copy of natives/ (and later clean them)
+    from(jni.map { if (it.isEmpty()) emptyList() else listOf(it) }) {
+        dirPermissions { unix("rwxr-xr-x") }
+        filePermissions { unix("rw-r--r--") }
+    }
+    doFirst {
+        if (jni.get().isEmpty()) {
+            throw GradleException("BLOCKS_VODOZEMAC_JNI is not set: run Gradle in the Nix dev shell (./dev ./gradlew ...)")
+        }
+    }
 }
