@@ -107,6 +107,13 @@ open class Relation @JvmOverloads constructor(
     override val ref: ComponentRef by lazy { ComponentRef(name, ComponentKind.RELATION, null, source) }
 }
 
+/**
+ * An exclusive relation: at most one pair per entity, and adding a second replaces the first
+ * (`childOf = acc` in writes). A separate type so that code generation and the write API can tell.
+ */
+open class ExclusiveRelation @JvmOverloads constructor(name: String, source: SourceId = SourceId.POSTGRES) :
+    Relation(name, exclusive = true, source)
+
 /** Something an endpoint can do, with a payload of type [T]; an entity, never matched as a component. */
 open class Capability<T> @JvmOverloads constructor(
     name: String,
@@ -117,4 +124,4 @@ open class Capability<T> @JvmOverloads constructor(
 }
 
 /** `pgecs:child-of`: exclusive, acyclic, and deleting the parent deletes its children. */
-object ChildOf : Relation("pgecs:child-of", exclusive = true)
+object ChildOf : ExclusiveRelation("pgecs:child-of")

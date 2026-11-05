@@ -10,6 +10,7 @@ import kotlin.test.assertTrue
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import net.blocks168.pgecs.ChildOf
+import net.blocks168.pgecs.childOf
 import net.blocks168.pgecs.Component
 import net.blocks168.pgecs.EntityId
 import net.blocks168.pgecs.Relation
@@ -44,8 +45,6 @@ object LobbyDenied : Tag("b8:iam:lobby-access-denied")
 object Banned : Tag("b8:mod:banned")
 object OwnedBy : Relation("b8:test:owned-by")
 
-// What pgecs-ksp generates for ChildOf (see the KSP processor tests).
-infix fun EntityId.childOf(target: EntityId) = QueryBuilder.of(this, target).relate(ChildOf, this, target)
 
 /** Records the queries it is asked to run and answers with canned rows. */
 class FakeExecutor(private val rows: List<Array<Any?>> = emptyList()) : QueryExecutor {
