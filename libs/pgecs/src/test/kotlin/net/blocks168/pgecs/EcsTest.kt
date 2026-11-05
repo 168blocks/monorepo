@@ -289,6 +289,51 @@ class EcsTest {
     }
 
     @Test
+    fun `hooks run in the transaction and tell adds from sets`() {
+        Pgecs.on(database) {
+            loadModules = false
+            engine = QueryEngineConfig(eqsatInstances = 0)
+            register(MailComponent, ScoreComponent, Member, Muted, Likes, Leads)
+        }.use { hooked ->
+            hooked.freeze()
+            val log = ArrayList<String>()
+            hooked.hooks.onAdd(Member) { e -> log += "add member"; update(e.entity) { this[ScoreComponent] = Score(0) } }
+            hooked.hooks.onSet(ScoreComponent) { _, v -> log += "set ${v.points}" }
+            hooked.hooks.onRemove(Member) { log += "remove member" }
+            hooked.hooks.onRemove(Leads) { e -> log += "unlead ${e.target == null}" }
+            hooked.hooks.onAdd(Leads) { log += "lead" }
+            val (a, b) = hooked.tx { create() to create() }
+            val e = hooked.tx { create { +Member; +Member } }
+            hooked.tx { update(e) { this[ScoreComponent] = Score(5); set(Leads, a); set(Leads, b); -Member } }
+            assertEquals(listOf("add member", "set 0", "set 5", "lead", "unlead false", "lead", "remove member"), log)
+            hooked.read { assertEquals(Score(5), get(e, ScoreComponent)) }
+            // a throwing hook rolls the transaction back
+            hooked.hooks.onAdd(Muted) { error("no muting") }
+            assertFailsWith<IllegalStateException> { hooked.tx { update(e) { +Muted; this[ScoreComponent] = Score(9) } } }
+            hooked.read { assertEquals(Score(5), get(e, ScoreComponent)) }
+        }
+    }
+
+    @Test
+    fun `hot query shapes are recorded and pre-compiled at the next freeze`() {
+        val kind = "test-${UUID.randomUUID()}"
+        fun open() = Pgecs.on(database) {
+            loadModules = false
+            processKind = kind
+            engine = QueryEngineConfig(eqsatInstances = 0)
+            register(MailComponent, ScoreComponent, Member, Muted, Likes, Leads)
+        }.also { it.freeze() }
+        open().use { first ->
+            first.query { val m by entity; m has Member; select { m } }.count()
+        } // close records the shapes
+        open().use { second ->
+            val deadline = System.nanoTime() + 10_000_000_000
+            while (second.engine.metrics().cachedPlans == 0L && System.nanoTime() < deadline) Thread.sleep(20)
+            assertTrue(second.engine.metrics().cachedPlans > 0, "nothing pre-compiled")
+        }
+    }
+
+    @Test
     fun `ChildOf's handle and the core spec agree`() {
         assertEquals(CoreComponents.CHILD_OF, ChildOf.toSpec())
     }

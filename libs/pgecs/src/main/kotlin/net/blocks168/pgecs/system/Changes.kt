@@ -51,23 +51,20 @@ class EntityChange internal constructor(
 ) {
     private fun of(type: ComponentType) = rows.filter { it.rel == type.name }
 
-    /** Whether the transaction added [type] (any pair, for a relation) that the entity did not have before. */
-    fun added(type: ComponentType): Boolean = firstOps(type).any { it.op == ChangeOp.INSERT } && lastOps(type).any { it.op != ChangeOp.DELETE }
+    /** The rows of [type], per key (target), in the order the transaction changed them. */
+    private fun perKey(type: ComponentType): Collection<List<ChangeRow>> = rows.filter { it.rel == type.name }.groupBy { it.target }.values
 
-    /** Whether the transaction removed [type] (any pair, for a relation) that the entity had before. */
-    fun removed(type: ComponentType): Boolean = firstOps(type).any { it.op != ChangeOp.INSERT } && lastOps(type).any { it.op == ChangeOp.DELETE }
+    /** Whether the transaction added [type] (a pair of it, for a relation) that the entity did not have before. */
+    fun added(type: ComponentType): Boolean = perKey(type).any { it.first().op == ChangeOp.INSERT && it.last().op != ChangeOp.DELETE }
+
+    /** Whether the transaction removed [type] (a pair of it, for a relation) that the entity had before. */
+    fun removed(type: ComponentType): Boolean = perKey(type).any { it.first().op != ChangeOp.INSERT && it.last().op == ChangeOp.DELETE }
 
     /** Whether the transaction changed the value of [type] that the entity had before and still has. */
-    fun updated(type: ComponentType): Boolean = of(type).groupBy { it.target }.values.any { rs ->
-        rs.first().op == ChangeOp.UPDATE && rs.last().op != ChangeOp.DELETE
-    }
+    fun updated(type: ComponentType): Boolean = perKey(type).any { it.first().op == ChangeOp.UPDATE && it.last().op != ChangeOp.DELETE }
 
     /** Whether any row of [type] changed. */
-    fun touched(type: ComponentType): Boolean = of(type).isNotEmpty()
-
-    private fun firstOps(type: ComponentType) = of(type).groupBy { it.target }.values.map { it.first() }
-
-    private fun lastOps(type: ComponentType) = of(type).groupBy { it.target }.values.map { it.last() }
+    fun touched(type: ComponentType): Boolean = rows.any { it.rel == type.name }
 
     /** The entity before the transaction. */
     val old: Old = Old()

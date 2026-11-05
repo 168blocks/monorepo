@@ -206,6 +206,24 @@ class SystemsTest {
     }
 
     @Test
+    fun `change views tell keys apart`() {
+        val t1 = EntityId.of(UUID.randomUUID())
+        val t2 = EntityId.of(UUID.randomUUID())
+        val c = EntityChange(
+            EntityId.of(UUID.randomUUID()), 1,
+            listOf(
+                ChangeRow(ChildOf.name, t1, ChangeOp.UPDATE, null),
+                ChangeRow(ChildOf.name, t2, ChangeOp.INSERT, null),
+                ChangeRow(ChildOf.name, t2, ChangeOp.DELETE, null),
+            ),
+        )
+        assertFalse(c.removed(ChildOf), "t1 is kept, t2 never existed before")
+        assertFalse(c.added(ChildOf))
+        assertTrue(c.updated(ChildOf))
+        assertEquals(listOf(t1), c.old.targets(ChildOf))
+    }
+
+    @Test
     fun `a new observer starts after what was already committed`() {
         val ecs = process()
         ecs.tx { create { this[BanComponent] = Ban("old") } }
