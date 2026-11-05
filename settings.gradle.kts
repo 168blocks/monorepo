@@ -23,6 +23,8 @@ include(":frontend") // Compose Multiplatform (web + desktop)
 // Minecraft
 include(":mods:example-common") // Fabric mod (Kotlin + Java mixins), server and client
 include(":velocity:example-plugin") // Velocity plugin
+include(":mods:e2e-agent") // dev only: server state over HTTP for the e2e tests
+include(":velocity:e2e-agent") // dev only: proxy state over HTTP for the e2e tests
 
 // Network
 include(":deploy") // stages the podman compose network (deploy/compose.yaml)

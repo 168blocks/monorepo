@@ -39,6 +39,10 @@ scenario("second player sees the first in the lobby") {
   plugin.
 * `NetworkTest` also checks the backend through HTTP (health with database, counter persisted in
   PostgreSQL, web frontend served).
+* Server-side agents (see "Server-side assertions" below): `ServerAgent` / `ProxyAgent` in
+  `e2e/.../agent/`; `AgentTest` checks that Velocity reports its servers and that both Fabric servers
+  report their worlds and run commands (`list`). The Fabric server tests are skipped unless
+  `BLOCKS_ACCEPT_EULA=true`.
 
 ### Design: drivers
 
@@ -73,6 +77,29 @@ Two kinds of simulated players, because they have very different costs:
 inside the compose network (players, positions, worlds, run command), and the Velocity side gets the
 same in a dev-only plugin (which backend each player is on). Tests reach them through a published
 port per service. In production deployments these are absent.
+
+Implemented as `mods/e2e-agent` (server-only Fabric mod) and `velocity/e2e-agent`: JSON over the JDK's
+`com.sun.net.httpserver`, Gson for JSON (shipped by Minecraft and Velocity), so neither has dependencies
+of its own. Each listens on `BLOCKS_E2E_AGENT_PORT` inside its container (deploy/compose.yaml; unset
+means off) and is published on 127.0.0.1 at `28500` (velocity), `28501` (lobby), `28502` (survival)
+`+ 10·slot`; the tests read `BLOCKS_E2E_AGENT_<VELOCITY|LOBBY|SURVIVAL>` (tools/instance.sh). Only
+`:deploy:stage` (the local test network) stages them. They are unauthenticated and can run any
+command: never deploy them to production.
+
+| Agent | Endpoint | Answer |
+| --- | --- | --- |
+| Fabric | `GET /status` | `{server, minecraft, tick, players}` |
+| Fabric | `GET /players` | `[{uuid, name, dimension, x, y, z, yaw, pitch, gameMode}]` |
+| Fabric | `GET /worlds` | `[{id, players}]` |
+| Fabric | `POST /command {"command": "list"}` | `{success, result, output: [lines]}` (as the server console) |
+| Velocity | `GET /status` | `{version, players}` |
+| Velocity | `GET /servers` | `[{name, address, players}]` |
+| Velocity | `GET /players` | `[{uuid, name, server}]` (`server` null while not on a backend) |
+| Velocity | `POST /send {"player": "alice", "server": "survival"}` | `{status, success, reason}` |
+
+Errors are `{"error": "..."}` with 400 (bad request), 404 (unknown player/server/path) or 500.
+`ServerAgent` adds `assertOnline`, `assertOffline`, `assertPosition`; `ProxyAgent` adds `assertOn`
+(polling with a timeout).
 
 The database is checked directly through pgecs, the same way the services use it.
 

@@ -67,7 +67,8 @@ What keeps them apart:
   checkout claims a slot 0–19 in `~/.local/share/168blocks/instances/`, recorded with its path. The
   slot sets the compose project (`blocks168-<slot>`, so containers, networks and volumes are
   separate) and every host port: edges `25501-25503 + 10·slot`, backend `8080 + 10·slot`,
-  PostgreSQL `55432 + 10·slot`, S3 `8333 + 10·slot`, and `gradlew runServer` `25565 + 10·slot`.
+  PostgreSQL `55432 + 10·slot`, S3 `8333 + 10·slot`, `gradlew runServer` `25565 + 10·slot`, and
+  the e2e agents (velocity, lobby, survival) `28500-28502 + 10·slot`.
   The end-to-end tests read the same values (`BLOCKS_E2E_*`). Slots of deleted checkouts are
   reclaimed; force one with `BLOCKS_INSTANCE_SLOT=<n>`.
 * **Images** built by Nix are tagged with their store hash, never `latest`, so worktrees on different

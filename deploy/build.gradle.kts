@@ -47,6 +47,10 @@ val lobbyMods = nonTransitive("lobbyMods")
 val survivalMods = nonTransitive("survivalMods")
 val ourMods = nonTransitive("ourMods")
 val backendDist = nonTransitive("backendDist")
+// dev-only end-to-end test agents (docs/testing.md); this network is the local test network, a
+// production deployment never stages them
+val e2eMods = nonTransitive("e2eMods")
+val e2ePlugins = nonTransitive("e2ePlugins")
 
 dependencies {
     velocityProxy("${libs.versions.velocity.proxy.sha256.get()}:velocity:${libs.versions.velocity.asProvider().get()}-${libs.versions.velocity.proxy.build.get()}@jar")
@@ -67,6 +71,9 @@ dependencies {
     survivalMods(libs.mod.scalablelux)
 
     ourMods(project(":mods:example-common"))
+
+    e2eMods(project(":mods:e2e-agent"))
+    e2ePlugins(project(":velocity:e2e-agent", "pluginJar"))
 }
 
 val stageDir = layout.buildDirectory.dir("stage")
@@ -88,6 +95,7 @@ val stageVelocity = tasks.register<Sync>("stageVelocity") {
     into(stageDir.map { it.dir("velocity") })
     from(velocityProxy) { rename { "velocity.jar" } }
     from(velocityPlugins) { into("plugins") }
+    from(e2ePlugins) { into("plugins") }
     from("velocity")
     from(layout.buildDirectory.file("forwarding.secret"))
     preserve { include("logs/**", "plugins/*/**") }
@@ -102,6 +110,7 @@ fun stageFabricServer(name: String, mods: Configuration) = tasks.register<Sync>(
     from(fabricLauncher) { rename { "fabric-server-launch.jar" } }
     from(mods) { into("mods") }
     from(ourMods) { into("mods") }
+    from(e2eMods) { into("mods") }
     from("fabric/common")
     from("fabric/$name")
     // the downloaded server, libraries, worlds and logs survive re-staging

@@ -13,6 +13,7 @@
 #   8080         backend (+ web frontend)
 #   55432        PostgreSQL (5432 is often taken by a host PostgreSQL)
 #   8333         S3 API (SeaweedFS)
+#   28500-28502  e2e agents (dev only): velocity, lobby, survival (BLOCKS_E2E_AGENT_PORT in the container)
 # Images are tagged by their Nix store hash (BLOCKS_*_IMAGE), so worktrees on different versions of
 # flake.nix do not overwrite each other's images.
 name: blocks168
@@ -73,7 +74,11 @@ services:
   velocity:
     <<: *jvm
     command: ["java", "-Xmx512M", "-jar", "velocity.jar"]
+    environment:
+      <<: *jvm-env
+      BLOCKS_E2E_AGENT_PORT: "8765" # velocity/e2e-agent (dev only)
     volumes: ["./build/stage/velocity:/srv:Z"]
+    ports: ["127.0.0.1:${BLOCKS_VELOCITY_AGENT_PORT:-28500}:8765"]
     depends_on: [postgres]
 
   lobby:
@@ -82,7 +87,9 @@ services:
     environment:
       <<: *jvm-env
       BLOCKS_SERVER_ID: lobby
+      BLOCKS_E2E_AGENT_PORT: "8765" # mods/e2e-agent (dev only)
     volumes: ["./build/stage/lobby:/srv:Z"]
+    ports: ["127.0.0.1:${BLOCKS_LOBBY_AGENT_PORT:-28501}:8765"]
     depends_on: [postgres]
 
   survival:
@@ -91,7 +98,9 @@ services:
     environment:
       <<: *jvm-env
       BLOCKS_SERVER_ID: survival
+      BLOCKS_E2E_AGENT_PORT: "8765" # mods/e2e-agent (dev only)
     volumes: ["./build/stage/survival:/srv:Z"]
+    ports: ["127.0.0.1:${BLOCKS_SURVIVAL_AGENT_PORT:-28502}:8765"]
     depends_on: [postgres]
 
   edge-1:

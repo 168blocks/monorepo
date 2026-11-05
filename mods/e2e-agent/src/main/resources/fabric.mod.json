@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "blocks168-e2e-agent",
+  "version": "${version}",
+  "name": "168blocks e2e agent",
+  "description": "Dev-only: exposes server state (players, worlds, commands) over HTTP for the end-to-end tests. Never deploy to production.",
+  "authors": ["168blocks"],
+  "license": "proprietary",
+  "environment": "server",
+  "entrypoints": {
+    "server": [{ "adapter": "kotlin", "value": "net.blocks168.mod.e2e.E2eAgentMod" }]
+  },
+  "depends": {
+    "fabricloader": ">=${fabricLoader}",
+    "fabric-api": "*",
+    "fabric-language-kotlin": ">=${fabricKotlin}",
+    "minecraft": "~${minecraft}",
+    "java": ">=${java}"
+  }
+}
