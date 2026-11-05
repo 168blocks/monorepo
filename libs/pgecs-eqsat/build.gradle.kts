@@ -17,7 +17,7 @@ dependencies {
 // egglog.wasm is built by Nix (nix/egglog-wasm.nix); the dev shell points BLOCKS_EGGLOG_WASM at it.
 val egglogWasm: Provider<String> = providers.environmentVariable("BLOCKS_EGGLOG_WASM").orElse("")
 
-val aotName = "net.blocks168.pgecs.eqsat.aot.EgglogModule"
+val aotName = "dev.vxcc.alexs168.pgecs.eqsat.aot.EgglogModule"
 val aotDir = layout.buildDirectory.dir("generated/endive")
 val aotClasses = aotDir.map { it.dir("classes") }
 val aotSources = aotDir.map { it.dir("sources") }
@@ -83,8 +83,11 @@ tasks.withType<Test>().configureEach {
 tasks.register<JavaExec>("benchmark") {
     description = "Times egglog on the join-reordering workload (warm-up curve and steady state)"
     classpath = sourceSets.test.get().runtimeClasspath
-    mainClass.set("net.blocks168.pgecs.eqsat.BenchmarkKt")
+    mainClass.set("dev.vxcc.alexs168.pgecs.eqsat.BenchmarkKt")
     jvmArgs("-XX:-DontCompileHugeMethods")
     maxHeapSize = "1g"
     args(providers.gradleProperty("runs").orElse("1200").get())
 }
+
+// pgecs is published apart from the b8 code (dev.vxcc.b8, gradle.properties)
+group = "dev.vxcc.alexs168"

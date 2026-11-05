@@ -1,6 +1,6 @@
 # Matrix bot
 
-The backend can run a Matrix bot (`backend/src/main/kotlin/net/blocks168/backend/matrix/`) that posts to
+The backend can run a Matrix bot (`backend/src/main/kotlin/dev/vxcc/b8/backend/matrix/`) that posts to
 rooms and sends end-to-end encrypted direct messages to players on any homeserver. It uses
 [Trixnity](https://gitlab.com/connect2x/trixnity/trixnity) (`trixnity-client`), the full client with
 the vodozemac crypto driver: encrypted sending needs a sync loop, device lists, Olm sessions and Megolm

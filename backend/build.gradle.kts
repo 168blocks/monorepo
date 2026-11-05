@@ -7,7 +7,7 @@ plugins {
 description = "168blocks backend (Ktor)"
 
 application {
-    mainClass.set("net.blocks168.backend.MainKt")
+    mainClass.set("dev.vxcc.b8.backend.MainKt")
 }
 
 dependencies {
@@ -22,7 +22,7 @@ dependencies {
     implementation(libs.logback.classic)
     implementation(libs.kord.rest) // Discord bot, src/main/kotlin/.../discord
 
-    // Matrix bot (net.blocks168.backend.matrix): Trixnity with end-to-end encryption, store in PostgreSQL
+    // Matrix bot (dev.vxcc.b8.backend.matrix): Trixnity with end-to-end encryption, store in PostgreSQL
     implementation(platform(libs.trixnity.bom))
     implementation(platform(libs.ktor.bom)) // Trixnity's Ktor modules (auth, ...) at our Ktor version
     implementation(libs.trixnity.client)
@@ -42,7 +42,7 @@ tasks.register<JavaExec>("runDiscordExample") {
     group = "application"
     description = "Sends example Discord messages; needs BLOCKS_DISCORD_TOKEN and a channel or user id"
     classpath = sourceSets.main.get().runtimeClasspath
-    mainClass.set("net.blocks168.backend.discord.DiscordExampleKt")
+    mainClass.set("dev.vxcc.b8.backend.discord.DiscordExampleKt")
 }
 
 // Matrix bot: vodozemac's JNI library comes from Nix (nix/vodozemac-jni.nix, BLOCKS_VODOZEMAC_JNI in the dev

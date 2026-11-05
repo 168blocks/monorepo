@@ -8,7 +8,7 @@
   "license": "proprietary",
   "environment": "server",
   "entrypoints": {
-    "server": [{ "adapter": "kotlin", "value": "net.blocks168.mod.e2e.E2eAgentMod" }]
+    "server": [{ "adapter": "kotlin", "value": "dev.vxcc.b8.mod.e2e.E2eAgentMod" }]
   },
   "depends": {
     "fabricloader": ">=${fabricLoader}",

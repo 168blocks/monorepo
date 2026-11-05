@@ -5,5 +5,5 @@
   "description": "Online players across edges, cross-edge kicks/bans/sends/broadcasts, drain, maintenance mode",
   "authors": ["168blocks"],
   "dependencies": [],
-  "main": "net.blocks168.velocity.network.NetworkPlugin"
+  "main": "dev.vxcc.b8.velocity.network.NetworkPlugin"
 }

@@ -1,6 +1,6 @@
 # Discord bot (Kord)
 
-The backend talks to Discord with [Kord](https://github.com/kordlib/kord). Code: `backend/src/main/kotlin/net/blocks168/backend/discord/`.
+The backend talks to Discord with [Kord](https://github.com/kordlib/kord). Code: `backend/src/main/kotlin/dev/vxcc/b8/backend/discord/`.
 
 ## What it does now
 

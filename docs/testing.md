@@ -67,7 +67,7 @@ scenario("second player sees the first in the lobby") {
   server.jar --reports`). Formats come from the game's stream codecs (decompiled merged jar in the Loom
   cache). Its network tests are scenarios (`PlayerScenarioTest`, see "Scenario runner"). The bot has no world model: it does not know the
   terrain, so it can only make moves the caller knows are free.
-* Real game clients (`net.blocks168.e2e.client`, see "Game clients" below): `GameClientTest` starts a
+* Real game clients (`dev.vxcc.b8.e2e.client`, see "Game clients" below): `GameClientTest` starts a
   Minecraft 26.3 client, joins through edge 1, waits for the world and checks that its screenshots are
   not blank and stable.
 
