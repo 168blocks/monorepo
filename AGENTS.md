@@ -44,6 +44,44 @@ downloaded binaries are glibc builds that do not run on every host (the main dev
 podman still needs the host's setuid `newuidmap`/`newgidmap` and `/etc/subuid`, `/etc/subgid` entries.
 Use `./dev podman ps` etc. to look at the network's containers; the host's `podman` does not see them.
 
+## Several worktrees on one machine
+
+Several people (or agents) can work in separate git worktrees of this repository on the same machine at
+the same time, each with its own Nix dev shell, network and tests:
+
+```sh
+git fetch origin
+git worktree add ../monorepo-42-foo -b 42-foo origin/main   # one worktree per issue branch
+cd ../monorepo-42-foo
+./dev ./gradlew build
+tools/network.sh test
+tools/network.sh env          # this worktree's slot, ports and compose project
+tools/network.sh instances    # which checkout has which slot
+tools/network.sh down -v      # before deleting the worktree: containers and volumes
+git worktree remove ../monorepo-42-foo
+```
+
+What keeps them apart:
+
+* **Instance slot** (`tools/instance.sh`, sourced by the dev shell and `tools/network.sh`): each
+  checkout claims a slot 0–19 in `~/.local/share/168blocks/instances/`, recorded with its path. The
+  slot sets the compose project (`blocks168-<slot>`, so containers, networks and volumes are
+  separate) and every host port: edges `25501-25503 + 10·slot`, backend `8080 + 10·slot`,
+  PostgreSQL `55432 + 10·slot`, S3 `8333 + 10·slot`, and `gradlew runServer` `25565 + 10·slot`.
+  The end-to-end tests read the same values (`BLOCKS_E2E_*`). Slots of deleted checkouts are
+  reclaimed; force one with `BLOCKS_INSTANCE_SLOT=<n>`.
+* **Images** built by Nix are tagged with their store hash, never `latest`, so worktrees on different
+  `flake.nix` versions keep their own images (`./dev podman image prune` cleans unused ones).
+* **Gradle**: all build state is inside the checkout (`build/`, `.gradle/`, Loom's caches, the staged
+  network in `deploy/build/`, the generated forwarding secret). Only the dependency cache
+  `~/.gradle/caches` is shared, which Gradle supports concurrently.
+* **Tests**: `TestPostgres` starts each test JVM's own PostgreSQL in a temporary directory on a free
+  port. Nothing listens on fixed ports except what the instance slot assigns.
+* **Nix**: each worktree's `./dev` / `nix develop` uses that worktree's `flake.nix` and `flake.lock`.
+
+Do not hard-code ports, container or project names in new scripts or tests: take them from the
+`BLOCKS_*` variables (`tools/network.sh env`).
+
 ## Java and Kotlin
 
 * **Java 25** everywhere: Minecraft 26.3 requires it, and Velocity 4.3 (`velocity-api` 4.3.1) is

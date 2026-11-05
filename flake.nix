@@ -83,7 +83,7 @@
           # PostgreSQL with pg_jsonschema for deploy/compose.yaml (the official image lacks the extension)
           postgres-image = pkgs.dockerTools.buildLayeredImage {
             name = "localhost/168blocks/postgres";
-            # tag = hash of the image's store path (see tools/network.sh), so worktrees never share a tag
+            # tag = content hash chosen by Nix (tools/network.sh reads it), so worktrees never share a tag
             tag = null;
             contents = [
               (postgresFor pkgs)
@@ -111,7 +111,7 @@
           # files (deploy/build/stage/<service>) at /srv, so the image only changes with the JRE.
           runtime-image = pkgs.dockerTools.buildLayeredImage {
             name = "localhost/168blocks/runtime";
-            # tag = hash of the image's store path (see tools/network.sh), so worktrees never share a tag
+            # tag = content hash chosen by Nix (tools/network.sh reads it), so worktrees never share a tag
             tag = null;
             contents = [
               jre

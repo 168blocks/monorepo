@@ -28,11 +28,11 @@ stage() {
   local eula=false
   [ "${BLOCKS_ACCEPT_EULA:-}" = true ] && eula=true
   ./gradlew --console=plain -q :deploy:stage "-PacceptMinecraftEula=$eula"
-  # Nix-built images (flake.nix), tagged with the hash of their store path; loaded once per version
+  # Nix-built images (flake.nix), tagged by Nix with a content hash; loaded once per version
   local name image ref
   for name in runtime postgres; do
     image=$(nix build --no-link --print-out-paths ".#$name-image")
-    ref="localhost/168blocks/$name:$(basename "$image" | cut -d- -f1)"
+    ref=$(tar -xzOf "$image" manifest.json | jq -r '.[0].RepoTags[0]')
     podman image exists "$ref" || podman load -q -i "$image"
     export "BLOCKS_$(echo "$name" | tr a-z A-Z)_IMAGE=$ref"
   done
