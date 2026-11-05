@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "blocks168-creative-host",
+  "version": "${version}",
+  "name": "168blocks creative host",
+  "description": "Starts extra MinecraftServers in this server's JVM, sharing its datapacks and registries and copying template worlds.",
+  "authors": ["168blocks"],
+  "license": "proprietary",
+  "environment": "server",
+  "entrypoints": {
+    "server": [{ "adapter": "kotlin", "value": "dev.vxcc.b8.mod.creativehost.CreativeHostMod" }]
+  },
+  "mixins": ["blocks168-creative-host.mixins.json"],
+  "accessWidener": "blocks168-creative-host.accesswidener",
+  "depends": {
+    "fabricloader": ">=${fabricLoader}",
+    "fabric-api": "*",
+    "fabric-language-kotlin": ">=${fabricKotlin}",
+    "minecraft": "~${minecraft}",
+    "java": ">=${java}"
+  },
+  "recommends": {
+    "cohost-fixes": "*"
+  }
+}

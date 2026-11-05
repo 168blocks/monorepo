@@ -1,0 +1,9 @@
+accessWidener v2 official
+
+# the host server's datapack resources, reused by hosted servers (SharedStem)
+accessible class net/minecraft/server/MinecraftServer$ReloadableResources
+accessible field net/minecraft/server/MinecraftServer resources Lnet/minecraft/server/MinecraftServer$ReloadableResources;
+
+# what net.minecraft.server.Main does for a new world or its own datapack load (HostedServerFactory)
+accessible method net/minecraft/server/Main createNewWorldData (Lnet/minecraft/server/dedicated/DedicatedServerSettings;Lnet/minecraft/server/WorldLoader$DataLoadContext;Lnet/minecraft/core/Registry;ZZ)Lnet/minecraft/server/WorldLoader$DataLoadOutput;
+accessible method net/minecraft/server/Main loadOrCreateConfig (Lnet/minecraft/server/dedicated/DedicatedServerProperties;Lcom/mojang/serialization/Dynamic;ZLnet/minecraft/server/packs/repository/PackRepository;)Lnet/minecraft/server/WorldLoader$InitConfig;

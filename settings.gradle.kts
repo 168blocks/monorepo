@@ -40,5 +40,6 @@ if (providers.gradleProperty("blocks.minecraft").orNull != "false") {
     include(":mods:example-common") // Fabric mod (Kotlin + Java mixins), server and client
     include(":mods:e2e-client") // dev-only client mod: local RPC for end-to-end tests with real game clients
     include(":mods:e2e-agent") // dev only: server state over HTTP for the e2e tests
+    include(":mods:creative-host") // extra MinecraftServers in a running server's JVM, started fast (#6)
     include(":deploy") // stages the podman compose network (deploy/compose.yaml)
 }
