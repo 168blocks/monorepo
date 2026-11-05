@@ -12,6 +12,7 @@ rootProject.name = "168blocks"
 
 // Shared libraries
 include(":libs:pgecs") // ACID persistent ECS on PostgreSQL (backend, mods, Velocity plugins)
+include(":libs:pgecs-ir") // first-level query IR of pgecs (DSL in, planner and SQL compiler out)
 include(":libs:pgecs-eqsat") // equality saturation (egglog on Endive) for the pgecs query planner
 include(":libs:pgecs-lambda") // bytecode decompiler for pgecs query lambdas (where, select, orderBy, ...)
 include(":libs:common") // JVM code shared by all server-side components (CBOR wire format, ...)

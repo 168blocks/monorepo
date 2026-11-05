@@ -12,6 +12,9 @@ dependencies {
     implementation(libs.ktor.client.cio)
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.serialization.kotlinx.json)
+    // the scenario DSL (net.blocks168.e2e.scenario) builds on JUnit
+    implementation(platform(libs.junit.bom))
+    implementation(libs.junit.jupiter)
 }
 
 // The network tests need the running network: tools/network.sh test (passes -Pe2e). A plain
@@ -23,8 +26,8 @@ tasks.named<Test>("test") {
     outputs.upToDateWhen { false }
     outputs.cacheIf { false }
     // the network's addresses (tools/instance.sh), whether the Minecraft servers run (EULA), the
-    // game client environment (flake.nix)
-    System.getenv().filterKeys { it.startsWith("BLOCKS_E2E_") || it in setOf("BLOCKS_ACCEPT_EULA", "BLOCKS_CLIENT_ENV", "BLOCKS_SWAY") }.forEach { (k, v) -> environment(k, v) }
+    // game client environment (flake.nix), the compose project whose container logs a failed scenario attaches
+    System.getenv().filterKeys { it.startsWith("BLOCKS_E2E_") || it in setOf("BLOCKS_ACCEPT_EULA", "BLOCKS_CLIENT_ENV", "BLOCKS_SWAY", "BLOCKS_COMPOSE_PROJECT") }.forEach { (k, v) -> environment(k, v) }
     // real game clients (net.blocks168.e2e.client): the dev client's launch description, run directories
     if (e2e) {
         dependsOn(":mods:e2e-client:clientLaunch")

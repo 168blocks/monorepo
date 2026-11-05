@@ -132,6 +132,7 @@ jobs:
             e2e/build/e2e-clients/*/client.log
             e2e/build/e2e-clients/*/screenshots/
             e2e/build/e2e-clients/*/sway/sway.log
+            e2e/build/scenario-diagnostics/
           if-no-files-found: ignore
 
       - name: Container logs
