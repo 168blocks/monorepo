@@ -79,6 +79,9 @@ What keeps them apart:
   port. Nothing listens on fixed ports except what the instance slot assigns.
 * **Nix**: each worktree's `./dev` / `nix develop` uses that worktree's `flake.nix` and `flake.lock`.
 
+Never run `gradlew --stop`: it stops every Gradle daemon of that version on the machine, including
+other worktrees' running builds.
+
 Do not hard-code ports, container or project names in new scripts or tests: take them from the
 `BLOCKS_*` variables (`tools/network.sh env`).
 
