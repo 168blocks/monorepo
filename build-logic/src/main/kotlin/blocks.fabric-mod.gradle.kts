@@ -28,9 +28,16 @@ tasks.named<ProcessResources>("processResources") {
     filesMatching("fabric.mod.json") { expand(props) }
 }
 
-// `gradlew runServer` listens on this checkout's port (tools/instance.sh), so dev servers of several
-// worktrees can run at once.
 extensions.configure<net.fabricmc.loom.api.LoomGradleExtensionAPI> {
+    // The version's own JSON at its content-addressed URL instead of a lookup in Mojang's version manifest,
+    // which changes with every release: the same files on every build, and the hermetic Nix build
+    // (nix/gradle.nix) can lock them by hash.
+    customMinecraftMetadata.set(
+        "https://piston-meta.mojang.com/v1/packages/${libs.findVersion("mojang-version-json-sha1").get().requiredVersion}/" +
+            "${libs.findVersion("minecraft").get().requiredVersion}.json",
+    )
+    // `gradlew runServer` listens on this checkout's port (tools/instance.sh), so dev servers of several
+    // worktrees can run at once.
     runs.named("server") {
         programArgs("--port", System.getenv("BLOCKS_DEV_SERVER_PORT") ?: "25565")
     }

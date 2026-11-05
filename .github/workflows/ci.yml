@@ -92,7 +92,7 @@ jobs:
       - name: Packages
         run: |
           nix build -L --keep-going --no-link --max-jobs 2 \
-            .#backend .#frontend-web .#velocity-example-plugin .#libs \
+            .#backend .#frontend-web .#velocity-example-plugin .#libs .#mods .#fabric-server-launcher \
             .#postgres-image .#runtime-image 2>&1 | tee nix-build.log
           exit "${PIPESTATUS[0]}"
 

@@ -5,6 +5,8 @@
 //   ./dev ./gradlew :deploy:stage                                 (tools/network.sh does this)
 //   ./dev ./gradlew :deploy:stage -PacceptMinecraftEula=true      also writes eula.txt for the servers
 
+import org.gradle.kotlin.dsl.support.serviceOf
+
 plugins {
     base
     id("blocks.repositories")
@@ -21,17 +23,6 @@ repositories {
             }
         }
         filter { includeModule(libs.versions.velocity.proxy.sha256.get(), "velocity") }
-    }
-    exclusiveContent {
-        // fabric server launcher: fabric-server-launcher:<minecraft>:<loader>/<installer>
-        forRepository {
-            ivy("https://meta.fabricmc.net/v2/versions/loader/") {
-                name = "Fabric meta"
-                patternLayout { artifact("[module]/[revision]/server/[ext]") }
-                metadataSources { artifact() }
-            }
-        }
-        filter { includeGroup("fabric-server-launcher") }
     }
 }
 
@@ -58,7 +49,7 @@ dependencies {
     velocityPlugins(project(":velocity:example-plugin", "pluginJar"))
     velocityPlugins(project(":velocity:network", "pluginJar"))
     networkPlugin(project(":velocity:network", "pluginJar"))
-    fabricLauncher("fabric-server-launcher:${libs.versions.minecraft.get()}/${libs.versions.fabric.loader.get()}:${libs.versions.fabric.installer.get()}@jar")
+    fabricLauncher("net.fabricmc:fabric-installer:${libs.versions.fabric.installer.get()}:server")
 
     // mods on every Fabric server
     for (cfg in listOf(lobbyMods, survivalMods)) {
@@ -77,6 +68,36 @@ dependencies {
 
     e2eMods(project(":mods:e2e-agent"))
     e2ePlugins(project(":velocity:e2e-agent", "pluginJar"))
+}
+
+/**
+ * The Fabric server launcher (fabric-server-launch.jar): Fabric's installer for servers with an
+ * install.properties naming the Minecraft and loader versions, which is all meta.fabricmc.net adds to it
+ * when it serves .../loader/<minecraft>/<loader>/<installer>/server/jar. Built here, because that file is
+ * generated per request and has no fixed hash. On first start it downloads the server and libraries.
+ */
+val fabricInstallProperties = tasks.register("fabricInstallProperties") {
+    val text = "fabric-loader-version=${libs.versions.fabric.loader.get()}\ngame-version=${libs.versions.minecraft.get()}\n"
+    inputs.property("text", text)
+    val out = layout.buildDirectory.file("fabric-server-launcher/install.properties")
+    outputs.file(out)
+    doLast { out.get().asFile.writeText(text) }
+}
+val fabricServerLauncher = tasks.register<Jar>("fabricServerLauncher") {
+    archiveFileName = "fabric-server-launch.jar"
+    destinationDirectory = layout.buildDirectory.dir("fabric-server-launcher")
+    val archives = serviceOf<ArchiveOperations>() // not the script's zipTree: configuration cache
+    from(fabricLauncher.elements.map { jars -> jars.map { archives.zipTree(it) } }) { exclude("META-INF/MANIFEST.MF") }
+    from(fabricInstallProperties)
+    // the installer's own manifest
+    manifest {
+        attributes(
+            "Implementation-Title" to "FabricInstaller",
+            "Implementation-Version" to libs.versions.fabric.installer.get(),
+            "Main-Class" to "net.fabricmc.installer.ServerLauncher",
+            "Enable-Native-Access" to "ALL-UNNAMED",
+        )
+    }
 }
 
 val stageDir = layout.buildDirectory.dir("stage")
@@ -253,7 +274,7 @@ fun stageFabricServer(name: String, mods: Configuration, generatedWorld: Boolean
         doLast { destinationDir.resolve("world/.blocks168-source").writeText(fingerprint.get()) }
     }
     into(stageDir.map { it.dir(name) })
-    from(fabricLauncher) { rename { "fabric-server-launch.jar" } }
+    from(fabricServerLauncher)
     from(mods) { into("mods") }
     from(ourMods) { into("mods") }
     from(e2eMods) { into("mods") }
