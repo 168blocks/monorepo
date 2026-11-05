@@ -2,10 +2,10 @@ package net.blocks168.e2e
 
 /**
  * Addresses of the network under test. Defaults match deploy/compose.yaml; override with
- * `BLOCKS_E2E_EDGES` (comma-separated host:port) and `BLOCKS_E2E_BACKEND` (URL) to test another
- * deployment, e.g. staging.
+ * `BLOCKS_E2E_EDGES` (comma-separated host:port), `BLOCKS_E2E_BACKEND` (URL) and `BLOCKS_E2E_DNS`
+ * (host:port of the player DNS server) to test another deployment, e.g. staging.
  */
-data class Network(val edges: List<Endpoint>, val backendUrl: String) {
+data class Network(val edges: List<Endpoint>, val backendUrl: String, val dns: Endpoint = Endpoint("127.0.0.1", 10053)) {
     data class Endpoint(val host: String, val port: Int) {
         override fun toString() = "$host:$port"
     }
@@ -21,6 +21,9 @@ data class Network(val edges: List<Endpoint>, val backendUrl: String) {
                     Endpoint(host, port.toInt())
                 },
             backendUrl = env["BLOCKS_E2E_BACKEND"] ?: "http://127.0.0.1:8080",
+            dns = (env["BLOCKS_E2E_DNS"] ?: "127.0.0.1:10053").let {
+                Endpoint(it.substringBeforeLast(':'), it.substringAfterLast(':').toInt())
+            },
         )
     }
 }
