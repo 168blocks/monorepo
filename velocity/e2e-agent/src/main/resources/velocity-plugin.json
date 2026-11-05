@@ -1,0 +1,9 @@
+{
+  "id": "blocks168-e2e-agent",
+  "name": "168blocks e2e agent",
+  "version": "${version}",
+  "description": "Dev-only: exposes proxy state (players, servers) over HTTP for the end-to-end tests. Never deploy to production.",
+  "authors": ["168blocks"],
+  "dependencies": [],
+  "main": "net.blocks168.velocity.e2e.E2eAgentPlugin"
+}

@@ -22,5 +22,6 @@ tasks.named<Test>("test") {
     // the network is outside Gradle's view: never consider a run up to date
     outputs.upToDateWhen { false }
     outputs.cacheIf { false }
-    for (name in listOf("BLOCKS_E2E_EDGES", "BLOCKS_E2E_BACKEND")) System.getenv(name)?.let { environment(name, it) }
+    // the network's addresses (tools/instance.sh) and whether the Minecraft servers run (EULA)
+    System.getenv().filterKeys { it.startsWith("BLOCKS_E2E_") || it == "BLOCKS_ACCEPT_EULA" }.forEach { (k, v) -> environment(k, v) }
 }

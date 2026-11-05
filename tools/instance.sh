@@ -11,6 +11,7 @@
 #   PostgreSQL     55432       + 10*slot
 #   S3             8333        + 10*slot
 #   loom runServer 25565       + 10*slot (mods' `gradlew runServer`)
+#   e2e agents     28500-28502 + 10*slot (velocity, lobby, survival; dev only, docs/testing.md)
 #
 # The main checkout usually gets slot 0 (the documented default ports). Override with
 # BLOCKS_INSTANCE_SLOT=<n>. Slots of deleted checkouts are reclaimed automatically;
@@ -64,7 +65,13 @@ export BLOCKS_BACKEND_PORT=$((8080 + blocks_off))
 export BLOCKS_POSTGRES_PORT=$((55432 + blocks_off))
 export BLOCKS_S3_PORT=$((8333 + blocks_off))
 export BLOCKS_DEV_SERVER_PORT=$((25565 + blocks_off))
+export BLOCKS_VELOCITY_AGENT_PORT=$((28500 + blocks_off))
+export BLOCKS_LOBBY_AGENT_PORT=$((28501 + blocks_off))
+export BLOCKS_SURVIVAL_AGENT_PORT=$((28502 + blocks_off))
 # what the end-to-end tests connect to (e2e/.../Network.kt)
 export BLOCKS_E2E_EDGES="127.0.0.1:$BLOCKS_EDGE1_PORT,127.0.0.1:$BLOCKS_EDGE2_PORT,127.0.0.1:$BLOCKS_EDGE3_PORT"
 export BLOCKS_E2E_BACKEND="http://127.0.0.1:$BLOCKS_BACKEND_PORT"
+export BLOCKS_E2E_AGENT_VELOCITY="http://127.0.0.1:$BLOCKS_VELOCITY_AGENT_PORT"
+export BLOCKS_E2E_AGENT_LOBBY="http://127.0.0.1:$BLOCKS_LOBBY_AGENT_PORT"
+export BLOCKS_E2E_AGENT_SURVIVAL="http://127.0.0.1:$BLOCKS_SURVIVAL_AGENT_PORT"
 unset blocks_off blocks_registry n p
