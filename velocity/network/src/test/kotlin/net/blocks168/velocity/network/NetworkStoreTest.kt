@@ -1,6 +1,6 @@
 package net.blocks168.velocity.network
 
-import net.blocks168.pgecs.PgEcs
+import net.blocks168.pgecs.db.Database
 import net.blocks168.pgecs.PgEcsConfig
 import net.blocks168.pgecs.testing.TestPostgres
 import org.junit.jupiter.api.BeforeAll
@@ -20,10 +20,10 @@ import kotlin.test.assertTrue
 class NetworkStoreTest {
     private val admin = TestPostgres.config
     /** what the edges connect as (trust in the test server; pg_hba by tunnel address in the network) */
-    private val edgeConfig = PgEcsConfig(admin.jdbcUrl, "blocks_edge")
+    private val edgeConfig = admin.copy(user = "blocks_edge")
 
-    private fun sql(vararg statements: String) = PgEcs.connect(admin).use { ecs ->
-        ecs.transaction { c -> c.createStatement().use { st -> statements.forEach(st::execute) } }
+    private fun sql(vararg statements: String) = Database.connect(admin).use { db ->
+        db.tx { connection.createStatement().use { st -> statements.forEach(st::execute) } }
     }
 
     @BeforeAll
@@ -33,9 +33,9 @@ class NetworkStoreTest {
             "do $$ begin if not exists (select from pg_roles where rolname = 'blocks_edge') then create role blocks_edge login; end if; " +
                 "if not exists (select from pg_roles where rolname = 'blocks_ops') then create role blocks_ops login; end if; end $$",
         )
-        PgEcs.connect(admin).use { ecs -> ecs.transaction { NetworkSchema.migrate(it) } }
+        Database.connect(admin).use { db -> db.tx { NetworkSchema.migrate(connection) } }
         // a second run (another core start) applies nothing
-        assertEquals(0, PgEcs.connect(admin).use { ecs -> ecs.transaction { NetworkSchema.migrate(it) } })
+        assertEquals(0, Database.connect(admin).use { db -> db.tx { NetworkSchema.migrate(connection) } })
     }
 
     private fun store(edge: String) = NetworkStore(edgeConfig, edge)
@@ -49,7 +49,6 @@ class NetworkStoreTest {
         val e = assertFailsWith<SQLException> { s.tx { c -> c.createStatement().use { it.execute("create table network.x (i int)") } } }
         assertEquals("42501", e.sqlState, e.message) // insufficient privilege
         assertFailsWith<SQLException> { s.tx { c -> c.createStatement().use { it.execute("drop table network.bans") } } }
-        Unit
     }
 
     @Test
@@ -97,7 +96,6 @@ class NetworkStoreTest {
         assertEquals(emptyList(), s.heartbeat("127.0.0.1:1", false, listOf(NetworkStore.Session(uuid, "bob", session, null))))
         assertEquals(before + 1, s.onlineCount())
         s.unregister(uuid, session)
-        Unit
     }
 
     @Test

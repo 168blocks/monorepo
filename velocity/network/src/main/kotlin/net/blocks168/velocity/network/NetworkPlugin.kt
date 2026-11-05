@@ -21,6 +21,7 @@ import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.format.NamedTextColor
 import org.slf4j.Logger
 import java.net.InetSocketAddress
+import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -68,9 +69,18 @@ class NetworkPlugin @Inject constructor(
             logger.warn("PGECS_URL not set: network plugin off (no registry, no maintenance mode)")
             return
         }
-        // fail fast instead of hanging when the tunnel is gone
-        val sep = if ('?' in url) '&' else '?'
-        val config = PgEcsConfig(url + "${sep}connectTimeout=5&socketTimeout=10&tcpKeepAlive=true", System.getenv("PGECS_USER") ?: "blocks_edge")
+        // one pooled connection (the LISTEN connection is the other); short timeouts, so a dead tunnel
+        // is noticed in seconds
+        val config = PgEcsConfig(
+            jdbcUrl = url,
+            user = System.getenv("PGECS_USER") ?: "blocks_edge",
+            applicationName = "network-$edge",
+            pool = PgEcsConfig.Pool(maxSize = 1),
+            timeouts = PgEcsConfig.Timeouts(
+                connect = Duration.ofSeconds(5), acquire = Duration.ofSeconds(5),
+                statement = Duration.ofSeconds(5), lock = Duration.ofSeconds(5),
+            ),
+        )
         store = NetworkStore(config, edge)
         listener = NetworkListener(config, ::handle) { msg, e -> if (e == null) logger.warn(msg) else logger.warn(msg, e) }.start()
         proxy.scheduler.buildTask(this, Runnable { probe() }).repeat(PROBE_SECONDS, TimeUnit.SECONDS).schedule()
@@ -98,7 +108,7 @@ class NetworkPlugin @Inject constructor(
         try { block() } finally { flag.set(false) }
     }
 
-    private fun probe() = once(probing) {
+    private fun probe(): Unit = once(probing) {
         val s = store ?: return
         try {
             if (!schemaReady) {
@@ -118,7 +128,7 @@ class NetworkPlugin @Inject constructor(
         wasHealthy = now
     }
 
-    private fun heartbeat() = once(beating) {
+    private fun heartbeat(): Unit = once(beating) {
         val s = store ?: return
         if (!schemaReady) return
         val current = sessions.entries.map { (p, session) ->

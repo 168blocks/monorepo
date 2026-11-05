@@ -1,14 +1,14 @@
 package net.blocks168.velocity.network
 
-import net.blocks168.pgecs.PgEcs
+import net.blocks168.pgecs.db.Database
 import net.blocks168.pgecs.PgEcsConfig
 import java.sql.Connection
 import java.sql.SQLException
 import java.util.UUID
 
 /**
- * Every query of the network plugin, against the `network` schema ([NetworkSchema]). One connection
- * (through pgecs), reopened after failures; each call is one transaction. Calls throw [SQLException]
+ * Every query of the network plugin, against the `network` schema ([NetworkSchema]), through a pgecs
+ * [Database] (a one-connection pool), reopened after failures; each call is one transaction. Calls throw [SQLException]
  * when the database is unreachable: the plugin then goes into maintenance.
  */
 class NetworkStore(private val config: PgEcsConfig, val edge: String) : AutoCloseable {
@@ -16,24 +16,19 @@ class NetworkStore(private val config: PgEcsConfig, val edge: String) : AutoClos
     data class Edge(val name: String, val address: String, val players: Int, val draining: Boolean)
     data class Ban(val name: String, val reason: String)
 
-    private var ecs: PgEcs? = null
+    private var db: Database? = null
 
-    @Synchronized
+    /** One transaction (pgecs retries serialization failures); connects on first use and after failures */
     fun <T> tx(block: (Connection) -> T): T {
-        var attempt = 0
-        while (true) {
-            val db = ecs?.takeIf { !it.isClosed } ?: PgEcs.connect(config).also { ecs = it }
-            try {
-                return db.transaction(block)
-            } catch (e: SQLException) {
-                // serialization failure or deadlock between edges: retry; anything else: reconnect next time
-                if (e.sqlState in setOf("40001", "40P01") && ++attempt < 5) continue
-                if (e.sqlState?.startsWith("08") == true || e.sqlState == null || e.sqlState?.startsWith("57") == true) {
-                    runCatching { db.close() }
-                    ecs = null
-                }
-                throw e
+        val database = synchronized(this) { db ?: Database.connect(config).also { db = it } }
+        try {
+            return database.tx("network") { block(connection) }
+        } catch (e: SQLException) {
+            // an unreachable server: start over with a fresh pool next time
+            if (e.sqlState == null || e.sqlState!!.startsWith("08")) synchronized(this) {
+                if (db === database) { runCatching { database.close() }; db = null }
             }
+            throw e
         }
     }
 
@@ -171,8 +166,8 @@ class NetworkStore(private val config: PgEcsConfig, val edge: String) : AutoClos
 
     @Synchronized
     override fun close() {
-        runCatching { ecs?.close() }
-        ecs = null
+        runCatching { db?.close() }
+        db = null
     }
 
     companion object {

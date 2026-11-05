@@ -27,7 +27,12 @@ class NetworkListener(
             try {
                 val c = org.postgresql.Driver().connect(
                     config.jdbcUrl,
-                    Properties().apply { setProperty("user", config.user); setProperty("ApplicationName", "blocks168-network-listen") },
+                    Properties().apply {
+                        setProperty("user", config.user)
+                        setProperty("ApplicationName", "${config.applicationName}-listen")
+                        setProperty("connectTimeout", "${config.timeouts.connect.seconds}")
+                        setProperty("tcpKeepAlive", "true")
+                    },
                 ) ?: error("not a PostgreSQL JDBC URL: ${config.jdbcUrl}")
                 connection = c
                 c.createStatement().use { it.execute("listen ${NetworkStore.CHANNEL}") }
