@@ -30,6 +30,10 @@ tasks.withType<Test>().configureEach {
     // methods above HotSpot's 8000-bytecode limit (libs/pgecs-eqsat/README.md)
     jvmArgs("-XX:-DontCompileHugeMethods", "--enable-native-access=ALL-UNNAMED")
     maxHeapSize = "1g"
+    // ObserverModelTest: -Ppgecs.model.seed=random -Ppgecs.model.steps=5000 for a long run
+    for (name in listOf("seed", "steps")) {
+        providers.gradleProperty("pgecs.model.$name").orNull?.let { systemProperty("pgecs.model.$name", it) }
+    }
 }
 
 // pgecs is published apart from the b8 code (dev.vxcc.b8, gradle.properties)
