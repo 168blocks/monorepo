@@ -37,7 +37,7 @@ kotlin {
 
 compose.desktop {
     application {
-        mainClass = "net.blocks168.frontend.MainKt"
+        mainClass = "dev.vxcc.b8.frontend.MainKt"
         nativeDistributions {
             targetFormats(TargetFormat.AppImage)
             packageName = "168blocks"

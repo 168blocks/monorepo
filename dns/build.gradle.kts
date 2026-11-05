@@ -7,7 +7,7 @@ plugins {
 description = "168blocks player DNS: answers PowerDNS's remote backend from the edges in PostgreSQL (docs/dns.md)"
 
 application {
-    mainClass.set("net.blocks168.dns.MainKt")
+    mainClass.set("dev.vxcc.b8.dns.MainKt")
 }
 
 dependencies {
