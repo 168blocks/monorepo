@@ -65,6 +65,7 @@ sealed interface Expr {
     data class Literal(val value: Any, override val type: ValueType) : Expr, EntityRef {
         init {
             require(!type.nullable) { "a literal is never null; use Expr.IsNull" }
+            require(!type.list) { "a literal is never a list; lists are parameters" }
             val ok = when (type.kind) {
                 ValueType.Kind.BOOL -> value is Boolean
                 ValueType.Kind.INT -> value is Long

@@ -418,6 +418,19 @@ private class Rendering(private val stats: Stats, private val q: LogicalQuery, p
             Fn.ABS -> "abs(${a[0]})"
             Fn.COALESCE -> "coalesce(${a.joinToString(", ")})"
             Fn.CONCAT -> "(${a.joinToString(" || ")})"
+            Fn.REGEX -> "(${a[0]} ~ ${a[1]})"
+            Fn.JSON_CONTAINS -> "(${a[0]} @> jsonb_build_array(" + (e.args[1].kind?.let { "(${a[1]})::${it.sqlType}" } ?: a[1]) + "))"
+            Fn.JSON_SIZE -> "(case when jsonb_typeof(${a[0]}) = 'array' then jsonb_array_length(${a[0]})::bigint end)"
+            Fn.JSON_GET -> {
+                val k = e.kind ?: Kind.JSON
+                val index = "(${a[1]})::int"
+                val read = when (k) {
+                    Kind.JSON -> "${a[0]} -> $index"
+                    Kind.STRING -> "${a[0]} ->> $index"
+                    else -> "(${a[0]} ->> $index)::${k.sqlType}"
+                }
+                "(case when ${a[1]} >= 0 then $read end)"
+            }
         }
     }
 

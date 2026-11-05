@@ -11,6 +11,10 @@ data class Email(val address: String, val verifiedAt: Instant? = null, val score
 
 data class Link(val uuid: UUID)
 
+enum class Rank { GOLD, SILVER, BRONZE }
+
+data class Item(val name: String, val n: Int, val rank: Rank, val tags: List<String>, val r: Rank?)
+
 object Helpers {
     const val LIMIT = 10
 }
@@ -150,5 +154,64 @@ class KotlinGoldenTest {
         }
         assertTrue("loops" in e.message!!, e.message)
     }
-}
 
+    @Test
+    fun `when on a string compiles to a hashCode switch and reads as equalities`() {
+        check(
+            "(if (arg0.getName() == \"a\") then 1 else (if (arg0.getName() == \"b\") then 2 else (if (arg0.getName() == \"c\") then 2 else " +
+                "(if (arg0.getName() == \"d\") then 3 else (if (arg0.getName() == \"e\") then 4 else 0)))))",
+            fn<Item, Int> { when (it.name) { "a" -> 1; "b", "c" -> 2; "d" -> 3; "e" -> 4; else -> 0 } },
+        )
+    }
+
+    @Test
+    fun `when on an int`() {
+        check(
+            "(if (arg0.getN() == 1) then 10 else (if (arg0.getN() == 2) then 20 else (if (arg0.getN() == 3) then 30 else (if (arg0.getN() == 100) then 7 else 0))))",
+            fn<Item, Int> { when (it.n) { 1 -> 10; 2 -> 20; 3 -> 30; 100 -> 7; else -> 0 } },
+        )
+    }
+
+    @Test
+    fun `when on an enum reads the switch map`() {
+        val l = fn<Item, Int> { when (it.rank) { Rank.GOLD -> 1; Rank.SILVER -> 2; Rank.BRONZE -> 3 } }
+        check("(if (arg0.getRank() == const(Rank)) then 1 else (if (arg0.getRank() == const(Rank)) then 2 else 3))", l)
+        val outer = l.body as LExpr.Cond
+        assertEquals(Rank.GOLD, ((outer.condition as LExpr.Compare).right as LExpr.Const).value)
+        check(
+            "(if (arg0.getR() != null) then (if (arg0.getR() == const(Rank)) then 1 else 2) else 5)",
+            fn<Item, Int> { when (it.r) { Rank.GOLD -> 1; null -> 5; else -> 2 } },
+        )
+        check("(arg0.getRank() == const(Rank))", pred<Item> { when (it.rank) { Rank.SILVER -> true; else -> false } })
+    }
+
+    @Test
+    fun `collection literals`() {
+        check("listOf(\"a\", \"b\").contains(arg0.getName())", pred<Item> { it.name in listOf("a", "b") })
+        check("listOf(\"a\").contains(arg0.getName())", pred<Item> { it.name in listOf("a") })
+        check("setOf(\"a\", \"b\", \"c\").contains(arg0.getName())", pred<Item> { it.name in setOf("a", "b", "c") })
+        check("!listOf(\"a\", \"b\").contains(arg0.getName())", pred<Item> { it.name !in listOf("a", "b") })
+        check("listOf(arg0.getName(), \"x\").contains(\"y\")", pred<Item> { "y" in listOf(it.name, "x") })
+        check("ArraysKt.contains(arrayOf(1, 2), arg0.getN())", pred<Item> { it.n in intArrayOf(1, 2) })
+    }
+
+    @Test
+    fun `a value built in one branch stays per path`() {
+        check(
+            "(if (arg0.getN() <= 0) then listOf(\"b\").contains(arg0.getName()) else listOf(\"a\").contains(arg0.getName()))",
+            fn<Item, Boolean> { it.name in listOf(if (it.n > 0) "a" else "b") },
+        )
+    }
+
+    @Test
+    fun `list fields and regex calls stay calls`() {
+        check(
+            "(arg0.getTags().contains(\"x\") && ((arg0.getTags().size() > 2) && (arg0.getTags().get(0) == \"y\")))",
+            pred<Item> { "x" in it.tags && it.tags.size > 2 && it.tags[0] == "y" },
+        )
+        check(
+            "(new Regex(\"^a.*\").matches(arg0.getName()) && (Regex.find\$default(new Regex(\"d\"), arg0.getName(), 0, 2, null) != null))",
+            pred<Item> { Regex("^a.*").matches(it.name) && "d".toRegex().find(it.name) != null },
+        )
+    }
+}
