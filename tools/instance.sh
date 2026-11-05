@@ -8,7 +8,6 @@
 #
 #   edge proxies   25501-25503 + 10*slot
 #   backend        8080        + 10*slot
-#   PostgreSQL     55432       + 10*slot
 #   S3             8333        + 10*slot
 #   loom runServer 25565       + 10*slot (mods' `gradlew runServer`)
 #   e2e agents     28500-28502 + 10*slot (velocity, lobby, survival; dev only, docs/testing.md)
@@ -62,7 +61,6 @@ export BLOCKS_EDGE1_PORT=$((25501 + blocks_off))
 export BLOCKS_EDGE2_PORT=$((25502 + blocks_off))
 export BLOCKS_EDGE3_PORT=$((25503 + blocks_off))
 export BLOCKS_BACKEND_PORT=$((8080 + blocks_off))
-export BLOCKS_POSTGRES_PORT=$((55432 + blocks_off))
 export BLOCKS_S3_PORT=$((8333 + blocks_off))
 export BLOCKS_DEV_SERVER_PORT=$((25565 + blocks_off))
 export BLOCKS_VELOCITY_AGENT_PORT=$((28500 + blocks_off))

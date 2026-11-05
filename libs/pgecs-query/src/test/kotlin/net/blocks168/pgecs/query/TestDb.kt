@@ -16,7 +16,6 @@ class TestDb(name: String) : AutoCloseable {
         TestPostgres.config.jdbcUrl,
         java.util.Properties().apply {
             setProperty("user", TestPostgres.config.user)
-            setProperty("password", TestPostgres.config.password)
         },
     )
 

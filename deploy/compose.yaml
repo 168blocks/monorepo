@@ -9,11 +9,10 @@
 #
 # Host ports (all on 127.0.0.1) and the compose project name come from tools/instance.sh, so several
 # worktrees can run their networks side by side. Defaults (instance slot 0):
-#   25501-25503  edge proxies 1-3 (what players connect to)
+#   25501-25503  edge Velocity proxies 1-3 (what players connect to; 3 through its L4 filter)
 #   8080         backend (+ web frontend)
-#   55432        PostgreSQL (5432 is often taken by a host PostgreSQL)
 #   8333         S3 API (SeaweedFS)
-#   28500-28502  e2e agents (dev only): velocity, lobby, survival (BLOCKS_E2E_AGENT_PORT in the container)
+#   28500-28502  e2e agents (dev only): velocity (edge 1), lobby, survival (BLOCKS_E2E_AGENT_PORT in the container)
 # Images are tagged by their Nix store hash (BLOCKS_*_IMAGE), so worktrees on different versions of
 # flake.nix do not overwrite each other's images.
 name: blocks168
@@ -25,27 +24,25 @@ x-jvm: &jvm
   environment: &jvm-env
     PGECS_URL: jdbc:postgresql://postgres:5432/blocks
     PGECS_USER: blocks
-    PGECS_PASSWORD: blocks-dev
 
+# Edge Velocity proxies: players connect to them; each goes straight to the Fabric servers (no main
+# Velocity). Design: https://claude.ai/artifact/WDswfCSv1YSxbGT7HWgtzd
 x-edge: &edge
-  image: docker.io/library/haproxy:3.2-alpine
-  restart: unless-stopped
-  volumes:
-    - ./edge/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro,Z
-  depends_on: [velocity]
+  <<: *jvm
+  command: ["java", "-Xmx512M", "-jar", "velocity.jar"]
+  depends_on: [postgres]
 
 services:
   postgres:
     # PostgreSQL 18 with pg_jsonschema (required by pgecs), built by Nix (flake.nix: postgres-image)
     image: ${BLOCKS_POSTGRES_IMAGE:-localhost/168blocks/postgres:latest}
     restart: unless-stopped
+    # No passwords and no host port: only containers on this compose network can connect, as role
+    # `blocks`; see nix/postgres-entrypoint.sh. Admin: `tools/network.sh psql`.
     environment:
       POSTGRES_DB: blocks
-      POSTGRES_USER: blocks
-      POSTGRES_PASSWORD: blocks-dev
     volumes:
       - postgres:/var/lib/postgresql
-    ports: ["127.0.0.1:${BLOCKS_POSTGRES_PORT:-55432}:5432"]
     # no healthcheck: podman runs those through systemd timers, which not every host has. The
     # services retry their database connection instead (PgEcs.connect with retry).
 
@@ -69,16 +66,6 @@ services:
       BLOCKS_S3_ENDPOINT: http://s3:8333
     volumes: ["./build/stage/backend:/srv:ro,Z"]
     ports: ["127.0.0.1:${BLOCKS_BACKEND_PORT:-8080}:8080"]
-    depends_on: [postgres]
-
-  velocity:
-    <<: *jvm
-    command: ["java", "-Xmx512M", "-jar", "velocity.jar"]
-    environment:
-      <<: *jvm-env
-      BLOCKS_E2E_AGENT_PORT: "8765" # velocity/e2e-agent (dev only)
-    volumes: ["./build/stage/velocity:/srv:Z"]
-    ports: ["127.0.0.1:${BLOCKS_VELOCITY_AGENT_PORT:-28500}:8765"]
     depends_on: [postgres]
 
   lobby:
@@ -105,13 +92,29 @@ services:
 
   edge-1:
     <<: *edge
-    ports: ["127.0.0.1:${BLOCKS_EDGE1_PORT:-25501}:25565"]
+    environment:
+      <<: *jvm-env
+      BLOCKS_E2E_AGENT_PORT: "8765" # velocity/e2e-agent (dev only), published for edge 1
+    volumes: ["./build/stage/edge-1:/srv:Z"]
+    ports:
+      - "127.0.0.1:${BLOCKS_EDGE1_PORT:-25501}:25565"
+      - "127.0.0.1:${BLOCKS_VELOCITY_AGENT_PORT:-28500}:8765"
   edge-2:
     <<: *edge
+    volumes: ["./build/stage/edge-2:/srv:Z"]
     ports: ["127.0.0.1:${BLOCKS_EDGE2_PORT:-25502}:25565"]
   edge-3:
+    # behind edge-3-filter (haproxy-protocol = true); not published itself
     <<: *edge
+    volumes: ["./build/stage/edge-3:/srv:Z"]
+  edge-3-filter:
+    # stands in for an L4 DDoS filter: PROXY protocol v2 to edge 3
+    image: docker.io/library/haproxy:3.2-alpine
+    restart: unless-stopped
+    volumes:
+      - ./edge-filter/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro,Z
     ports: ["127.0.0.1:${BLOCKS_EDGE3_PORT:-25503}:25565"]
+    depends_on: [edge-3]
 
 volumes:
   postgres:

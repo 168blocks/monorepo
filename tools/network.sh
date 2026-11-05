@@ -6,6 +6,7 @@
 #   tools/network.sh down [-v]            stop (-v also deletes the database and S3 volumes)
 #   tools/network.sh logs [service]
 #   tools/network.sh ps
+#   tools/network.sh psql [args]          psql as postgres inside the database container
 #   tools/network.sh env                  this checkout's instance slot, ports, compose project
 #   tools/network.sh instances            all checkouts' slots on this machine
 #
@@ -23,6 +24,10 @@ BLOCKS_ROOT=$PWD . tools/instance.sh
 # podman and podman-compose come from the dev shell (flake.nix, nix/podman.nix). Started containers
 # would inherit our stdout/stderr; detach them so callers piping our output are not kept waiting.
 compose() { podman-compose -p "$BLOCKS_COMPOSE_PROJECT" -f deploy/compose.yaml "$@" </dev/null; }
+
+# `up` once more on failure: with several networks starting at the same time (worktrees, agents),
+# podman-compose occasionally loses a race between creating and starting a container or network.
+compose_up() { compose up -d "$@" || { echo "compose up failed, retrying once" >&2; sleep 3; compose up -d "$@"; }; }
 
 stage() {
   local eula=false
@@ -58,12 +63,12 @@ cmd=${1:-up}; shift || true
 case "$cmd" in
   up)
     stage
-    compose up -d "$@"
+    compose_up "$@"
     echo "network $BLOCKS_COMPOSE_PROJECT: edges 127.0.0.1:$BLOCKS_EDGE1_PORT-$BLOCKS_EDGE3_PORT, backend $BLOCKS_E2E_BACKEND"
     ;;
   test)
     stage
-    compose up -d
+    compose_up
     for port in "$BLOCKS_EDGE1_PORT" "$BLOCKS_EDGE2_PORT" "$BLOCKS_EDGE3_PORT"; do wait_port 127.0.0.1 "$port" 60; done
     wait_http "$BLOCKS_E2E_BACKEND/api/health" 120
     ./gradlew --console=plain :e2e:test -Pe2e "$@"
@@ -77,5 +82,7 @@ case "$cmd" in
     ;;
   logs) compose logs "$@" ;;
   ps) compose ps ;;
+  psql) # psql as the postgres superuser inside the database container (peer auth, no password)
+    exec podman exec -it --user postgres "${BLOCKS_COMPOSE_PROJECT}_postgres_1" psql -h /run/postgresql -U postgres -d blocks "$@" ;;
   *) sed -n '2,18p' "$0"; exit 2 ;;
 esac

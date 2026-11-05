@@ -58,20 +58,19 @@ class PgEcsTest {
         val port = java.net.ServerSocket(0).use { it.localPort }
         val start = System.currentTimeMillis()
         assertFailsWith<SQLException> {
-            PgEcs.connectWithRetry(PgEcsConfig("jdbc:postgresql://127.0.0.1:$port/x", "u", ""), timeoutMillis = 500, intervalMillis = 100)
+            PgEcs.connectWithRetry(PgEcsConfig("jdbc:postgresql://127.0.0.1:$port/x", "u"), timeoutMillis = 500, intervalMillis = 100)
         }
         assertTrue(System.currentTimeMillis() - start >= 500)
     }
 
     @Test
     fun `rejects non-postgres urls`() {
-        assertFailsWith<SQLException> { PgEcs.connect(PgEcsConfig("jdbc:mysql://x/y", "u", "p")) }
+        assertFailsWith<SQLException> { PgEcs.connect(PgEcsConfig("jdbc:mysql://x/y", "u")) }
     }
 
     @Test
-    fun `config from env and hides password`() {
-        val cfg = PgEcsConfig.fromEnv(mapOf("PGECS_URL" to "jdbc:postgresql://db/x", "PGECS_USER" to "u", "PGECS_PASSWORD" to "secret"))
-        assertEquals("u", cfg.user)
-        assertTrue("secret" !in cfg.toString())
+    fun `config from env`() {
+        val cfg = PgEcsConfig.fromEnv(mapOf("PGECS_URL" to "jdbc:postgresql://db/x", "PGECS_USER" to "u"))
+        assertEquals(PgEcsConfig("jdbc:postgresql://db/x", "u"), cfg)
     }
 }

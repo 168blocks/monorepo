@@ -129,6 +129,9 @@ jobs:
           path: |
             e2e/build/reports/
             e2e/build/test-results/
+            e2e/build/e2e-clients/*/client.log
+            e2e/build/e2e-clients/*/screenshots/
+            e2e/build/e2e-clients/*/sway/sway.log
           if-no-files-found: ignore
 
       - name: Container logs

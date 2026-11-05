@@ -35,7 +35,7 @@ scenario("second player sees the first in the lobby") {
   `BLOCKS_E2E_EDGES` / `BLOCKS_E2E_BACKEND`, so the same tests can run against staging).
 * `StatusPing`: the Minecraft server list ping, written against the real protocol. `NetworkTest` pings
   each of the three edge proxies and checks that the answer comes from Velocity *with the example
-  plugin loaded* (the plugin sets the MOTD). This covers: edge proxy → PROXY protocol v2 → Velocity →
+  plugin loaded* (the plugin sets the MOTD). This covers: edge Velocity (edge 3 through its PROXY protocol v2 filter) →
   plugin.
 * `NetworkTest` also checks the backend through HTTP (health with database, counter persisted in
   PostgreSQL, web frontend served).
@@ -43,6 +43,45 @@ scenario("second player sees the first in the lobby") {
   `e2e/.../agent/`; `AgentTest` checks that Velocity reports its servers and that both Fabric servers
   report their worlds and run commands (`list`). The Fabric server tests are skipped unless
   `BLOCKS_ACCEPT_EULA=true`.
+* `LobbyTest`: a bot joins the lobby at 0.5/-63/0.5, stays at full health and walks a 20x20 square;
+  through the agent, the grass floor and free space around the spawn, forced spawn chunks, game
+  rules (#26).
+* `bot.Bot`: the protocol-level bot client (see "Drivers" below), Minecraft 26.3 / protocol 777.
+  Offline login through an edge proxy and Velocity (compression, login plugin queries, cookies),
+  configuration (known packs, keep-alive, resource packs, code of conduct), play (keep-alive, ping,
+  teleport confirm, `player_loaded`, chunk batch acks, movement with `client_tick_end`, chat and
+  commands), server switches (`start_configuration`), and the positions of the other players it sees.
+  Packet ids are in `bot/PacketIds.kt`; a unit test checks them against the game's own report
+  (`src/test/resources/packets-26.3.json`, from `java -DbundlerMainClass=net.minecraft.data.Main -jar
+  server.jar --reports`). Formats come from the game's stream codecs (decompiled merged jar in the Loom
+  cache). `BotNetworkTest` joins through the edges, checks world and game mode, two bots meeting,
+  movement seen by another bot, chat, and `/server survival` and back. It needs the Minecraft servers
+  and is skipped unless `BLOCKS_ACCEPT_EULA=true`. The bot has no world model: it does not know the
+  terrain, so it can only make moves the caller knows are free.
+* Real game clients (`net.blocks168.e2e.client`, see "Game clients" below): `GameClientTest` starts a
+  Minecraft 26.3 client, joins through edge 1, waits for the world and checks that its screenshots are
+  not blank and stable.
+
+### Game clients (`client("bob")`)
+
+* `mods/e2e-client`: dev-only, client-only Fabric mod, never deployed. A JSON-lines RPC on a free
+  localhost port (written to `e2e-rpc.port` in the run directory): `connect`, `awaitReady`,
+  `awaitWorld`, `awaitEntity`, `awaitChat`, `chat`, `command`, `look`, `input` (hold keys), `hud`,
+  `screenshot`, `quit` (`RpcHandler`). A mixin makes the window always count as focused.
+* `:mods:e2e-client:clientLaunch` writes how Loom's `runClient` would start the game to
+  `build/e2e-client/launch.json`; `GameClients` (in `e2e/`) starts clients from it, each with its own
+  run directory (`e2e/build/e2e-clients/<name>`: `client.log`, `screenshots/`), offline-mode username
+  and its own headless sway (`WLR_BACKENDS=headless`, pixman, private `XDG_RUNTIME_DIR`). Nothing
+  appears on the desktop; no fixed ports.
+* Rendering is Mesa llvmpipe through OpenGL on SDL's Wayland driver, so no GPU is needed. The client
+  libraries and Mesa environment come from `blocks-client-env` (flake.nix, `BLOCKS_CLIENT_ENV`), which
+  only the client processes run under; the dev shell itself is unchanged.
+* `Screenshot`: blank check, a coarse difference (box-filtered to 64 columns) and `assertMatches(name,
+  maxDiff)` against `e2e/src/test/screenshots/<name>.png`. References are written only with
+  `tools/network.sh test -PupdateScreenshots`. The local worlds use random seeds, so `GameClientTest`
+  compares frames with each other rather than with a stored reference.
+* Fabric's client game test API was evaluated and not used: it runs tests inside the client in lockstep
+  and only connects to its own in-process server (details in issue #3).
 
 ### Design: drivers
 
