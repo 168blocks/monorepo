@@ -55,16 +55,17 @@ configurations.configureEach {
 
 val vodozemacJni: Provider<String> = providers.environmentVariable("BLOCKS_VODOZEMAC_JNI").orElse("")
 
-sourceSets.main {
-    resources.srcDir(vodozemacJni.map { if (it.isEmpty()) emptyList() else listOf(it) })
-}
-
 tasks.processResources {
     val jni = vodozemacJni
+    // the Nix store is read-only: give the copies normal permissions, or Gradle cannot create the
+    // nested directories inside its read-only copy of natives/ (and later clean them)
+    from(jni.map { if (it.isEmpty()) emptyList() else listOf(it) }) {
+        dirPermissions { unix("rwxr-xr-x") }
+        filePermissions { unix("rw-r--r--") }
+    }
     doFirst {
         if (jni.get().isEmpty()) {
             throw GradleException("BLOCKS_VODOZEMAC_JNI is not set: run Gradle in the Nix dev shell (./dev ./gradlew ...)")
         }
     }
 }
-
