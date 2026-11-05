@@ -51,6 +51,21 @@ Problems for co-hosting, checked in the bytecode:
 safe as long as no thread works for two servers at once; shared pools (C2ME's worldgen workers) only
 use them within one task.
 
+### Traced run
+
+One Fabric server with all the mods above (Async included) under the agent's `trace` mode, sealed at
+"Done", then 15 commands (forceload, summons, fill, `/place structure` village and stronghold,
+gamerules, `save-all`, `/reload`) and a stop. Of the 52 statics written outside `<clinit>`, 4 were
+written after the server was up, all on the server thread:
+
+| Field | When | Verdict |
+| --- | --- | --- |
+| Async `ParallelProcessor.isShuttingDown`, `TickStats.onComplete` | stop, tick stats | Async: not co-hostable (above) |
+| Fabric API `ResourceConditionsImpl.currentFeatures` | data pack (re)load | the reloading server's feature flags; same for all servers with the same data packs. A `/reload` on one server while another loads would race: reload on the host only |
+| `GiveGiftToHero.GIFTS` (Fabric API `GiveGiftToHeroMixin`) | data pack (re)load | rebuilt from the same registries: same value for every server |
+
+Everything else is written once at bootstrap.
+
 ## Fixes (`mods/cohost-fixes`)
 
 `CoHost` tracks the servers running in the JVM (from `runServer` to `onServerExit`); the mixins keep
