@@ -1,6 +1,5 @@
 package dev.vxcc.b8.mod.example
 
-import dev.vxcc.b8.common.ServerHello
 import dev.vxcc.alexs168.pgecs.db.Database
 import dev.vxcc.alexs168.pgecs.PgEcsConfig
 import net.fabricmc.api.ModInitializer
@@ -40,11 +39,9 @@ object ExampleMod : ModInitializer {
         }
         ServerLifecycleEvents.SERVER_STOPPED.register { ecs?.close(); ecs = null }
         ServerPlayConnectionEvents.JOIN.register { handler, _, server ->
-            log.info("{} joined {}: {}", handler.player.name.string, serverId, hello(server))
+            log.info("{} joined {} ({} players, mod {})", handler.player.name.string, serverId, server.playerCount, modVersion())
         }
     }
-
-    fun hello(server: MinecraftServer) = ServerHello(serverId, modVersion(), server.playerCount)
 
     fun onServerTick(@Suppress("UNUSED_PARAMETER") server: MinecraftServer) {
         ticks++
