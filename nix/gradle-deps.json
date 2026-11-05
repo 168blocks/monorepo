@@ -634,6 +634,13 @@
    "pom": "sha256-FQxAKH987NwhuTgMqsmOkoxPM8Aj22s0jfHFrJdwJr8="
   }
  },
+ "https://maven.bawnorton.com/releases": {
+  "com/github/bawnorton/mixinsquared#mixinsquared-fabric/0.3.7-beta.1": {
+   "jar": "sha256-oQeWbA/66JZH2jOpSxrb27ii24lkKlhTtp5CIkdjigs=",
+   "module": "sha256-EJYr0sJWDze7+F1OkvwTdilMrNlG2jsaSSTKghYa/DA=",
+   "pom": "sha256-391Y4nCCauOuc62QcOmePI6F1DxbLa/2HzSJDmKfGXI="
+  }
+ },
  "https://maven.fabricmc.net": {
   "net/fabricmc#class-tweaker/0.3.0": {
    "jar": "sha256-g78oSQnRPHtK6VPD/hQWKN/tvlYSAhf2GJHDQfC+Lx8=",
