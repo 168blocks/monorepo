@@ -27,6 +27,8 @@ val pluginJar = tasks.register<Jar>("pluginJar") {
     val runtime = configurations.named("runtimeClasspath")
     dependsOn(runtime)
     from(runtime.map { cfg -> cfg.map { if (it.isDirectory) it else zipTree(it) } })
+    // Velocity provides SLF4J; a second copy would clash with its logger binding
+    exclude("org/slf4j/**")
     exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA", "META-INF/versions/*/module-info.class", "module-info.class")
 }
 tasks.named("assemble") { dependsOn(pluginJar) }

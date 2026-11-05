@@ -119,7 +119,7 @@ create index ecs_c_target on ecs_component (target, rel, entity)
 ### Database-enforced rules
 
 - **Serializable only.** Setup runs `ALTER DATABASE … SET default_transaction_isolation = 'serializable'`. The core trigger on `ecs_component` and `ecs_entity` also rejects any write where `current_setting('transaction_isolation') <> 'serializable'`. Postgres' guarantee only holds among serializable transactions, so this keeps every trigger-based invariant safe, even against a hand-written SQL session.
-- **Reserved entities.** A `BEFORE DELETE` trigger on `ecs_entity` refuses to delete the nil entity, ever. It also refuses component, relation and capability entities, except inside freeze when it retires them (freeze sets a transaction-local `pgecs.retiring` setting naming exactly those ids). Without this, one delete of the nil entity would cascade through every plain component in the database.
+- **Reserved entities.** A `BEFORE DELETE` trigger on `ecs_entity` refuses to delete the nil entity, ever. It also refuses component, relation and capability entities, always: retiring a component keeps its entity and catalog row (state `retired`) and deletes its rows instead, so a retired name can never be reused. Without this, one delete of the nil entity would cascade through every plain component in the database.
 - **Kinds and schemas.** The core trigger checks `kind` (tags have null values, value components do not, relations have a target), refuses writes to `pending` or `retired` components, and rejects any value where `jsonb_matches_schema(json_schema, value)` is false.
 - **Traits.** Exclusive is a partial unique index on `(entity)`. pgecs replaces the old pair in the same tx before inserting a new one, as flecs does. Acyclic, Symmetric and OneOf are triggers. Cleanup `remove` is the FK cascade. `delete` (as for `child-of`) and `panic` are a `BEFORE DELETE` trigger on `ecs_entity`.
 - **Entity version.** Every component write bumps `ecs_entity.version`, so two transactions touching one entity always conflict instead of interleaving. That makes busy entities (accounts, process entities) hot rows; see the contention guidance.
@@ -169,12 +169,12 @@ ecs.freeze()                          // registry read-only from here; tx and qu
 What `freeze()` does:
 
 1. Builds the desired state from the registry: catalog rows, JSON Schemas, indexes, trait flags, and a fingerprint per component.
-2. Takes the session-level `pg_advisory_lock(<pgecs schema lock>)` on one dedicated connection, held for the whole freeze, so two JVMs never run freeze at the same time.
+2. Takes the session-level advisory lock `SchemaSetup.SCHEMA_LOCK_KEY` on one dedicated connection, held for the whole freeze, so two JVMs never run freeze at the same time. Waiters poll with `pg_try_advisory_lock`: a session blocked inside `pg_advisory_lock` holds a snapshot, and `CREATE INDEX CONCURRENTLY` in the lock holder would wait for it forever. When the fingerprints already match, freeze takes no lock and writes nothing, so roles without DDL rights (the edge proxies) can run it.
 3. Compares fingerprints per component. Components whose fingerprint matches are left alone, which is the normal case on restart.
 4. **Transaction A:** inserts new components with `state = 'pending'`, applies additive schema changes, and records every index to build in `ecs_schema_index`. Trait flags are not changed yet.
 5. **Outside any transaction:** runs `CREATE [UNIQUE] INDEX CONCURRENTLY IF NOT EXISTS` for each recorded index. Writes to existing components continue meanwhile.
 6. **Verification:** checks `pg_index.indisvalid` for every index. An invalid one (from duplicate data or a crash mid-build) is dropped with `DROP INDEX CONCURRENTLY`. Freeze then stops startup and names the index and the conflicting entity ids. Nothing from Transaction A is undone: new components simply stay `pending`, which blocks writes to them.
-7. **Transaction B:** activates trait flags, marks components `active`, retires components marked with `retire("name")`, writes the fingerprints and an `ecs_schema_history` row, then releases the lock. A trait such as `exclusive` therefore only becomes visible to the planner once its index is valid.
+7. **Transaction B:** activates trait flags, marks components `active`, retires components marked with `retire("name")` (state `retired`, all their rows deleted), writes the fingerprints and an `ecs_schema_history` row, then releases the lock. A trait such as `exclusive` therefore only becomes visible to the planner once its index is valid.
 
 Safety rules for the diff:
 
@@ -184,6 +184,16 @@ Safety rules for the diff:
 - **Rolling deploys.** An older JVM starts fine if every component it knows has the same fingerprint in the database, or one that is an additive extension of its own. It never narrows the stored schema. It ignores components it does not know, and the database still enforces their constraints.
 
 Indexes are always built with `CREATE INDEX CONCURRENTLY`, so freeze never takes a write-blocking lock on `ecs_component`. The cost is that freeze is not one atomic transaction. The `pending` state and the steps above make every interruption safe, and a rerun picks up where it stopped.
+
+### Implementation (Postgres layer)
+
+The Postgres side lives in `libs/pgecs`: `net.blocks168.pgecs.db` (connection pool, transaction runner) and `net.blocks168.pgecs.schema` (base schema, freeze).
+
+- **Base schema.** `SchemaSetup.ensure` applies the versioned scripts in `resources/net/blocks168/pgecs/schema/` (`V1__base.sql`, ...) under the schema lock, one `SERIALIZABLE` transaction each, and records the version in `ecs_meta`. These are library migrations only; components never get hand-written ones. Triggers raise SQLSTATEs of class `EC` (`SqlStates`).
+- **Specs.** Freeze takes plain data, `ComponentSpec(name, kind, traits, jsonSchema, indexes)`, so component handles and JSON Schema derivation stay outside the Postgres layer. `IndexSpec.expressions` are `CREATE INDEX` elements in exactly the SQL the compiler emits for the matching predicate. The library's own components (`CoreComponents`, so far `pgecs:child-of`) are added by every freeze. The catalog is written only inside freeze, which sets the transaction-local `pgecs.in_freeze`.
+- **Diff.** Equal fingerprints, an active component and valid indexes mean nothing to do. If the stored component is an additive extension of the registered one, an older process is starting during a rolling deploy and leaves it alone. If the registered one extends the stored one, freeze upgrades it. Anything else stops startup. A schema change is checked against the stored values in transaction A; newly added `acyclic`, `symmetric` and `oneOf` traits are checked against existing pairs in transaction B.
+- **Transactions.** `Database.tx` / `read` / `readDeferrable` (blocking), `txSuspend` / `readSuspend`, `txAsync` / `readAsync`. Each runs `SET TRANSACTION ISOLATION LEVEL SERIALIZABLE, READ WRITE | READ ONLY` first. The block gets a `TxScope` whose `connection` refuses `commit`, `rollback()`, `setAutoCommit` and `close`, and stops working when the block ends. A serialization failure that the block caught (seen through the scope's connection or statements) still retries the transaction, and a transaction aborted by any other caught error fails instead of committing, since PostgreSQL would silently roll it back. A connection failure during `COMMIT` throws `TransactionOutcomeUnknownException` and is never retried.
+- **Timeouts.** `statement_timeout`, `lock_timeout` and `idle_in_transaction_session_timeout` are session settings of every pooled connection (`PgEcsConfig.timeouts`), with a client socket timeout as a last resort. Dedicated connections (freeze, locks, `LISTEN`) have no statement timeout.
 
 ### kotlinx.serialization integration
 
@@ -433,7 +443,7 @@ Two compiler rules matter for performance:
 - **Component names are inlined as literals**, values are bind parameters. Postgres only uses a partial index (`where rel = 'b8:iam:email:v1'`) when the literal is visible at plan time. Names are safe to inline because they come from the catalog and match a strict pattern.
 - **Index expressions are matched, never invented.** The compiler emits the SQL that the predicate literally means. When that SQL equals a declared index expression, Postgres uses the index. The compiler never rewrites a predicate into an index form with different semantics.
 
-A small `ecs_stats` view of row counts per `rel` feeds cost estimates, because the single-table layout hides per-component cardinality from Postgres' own statistics.
+Per-`rel` row estimates come from `pg_stats` on `ecs_component.rel` (most common values and frequencies times `pg_class.reltuples`), which `ANALYZE` keeps current at no cost, because the single-table layout hides per-component cardinality from Postgres' own per-table statistics.
 
 ### Optimizer and equality saturation
 
