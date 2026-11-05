@@ -12,7 +12,7 @@ dependencies {
     implementation(libs.ktor.client.cio)
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.serialization.kotlinx.json)
-    // the scenario DSL (net.blocks168.e2e.scenario) builds on JUnit
+    // the scenario DSL (dev.vxcc.b8.e2e.scenario) builds on JUnit
     implementation(platform(libs.junit.bom))
     implementation(libs.junit.jupiter)
 }
@@ -30,7 +30,7 @@ tasks.named<Test>("test") {
     // its images (ComposeNetwork)
     val passed = setOf("BLOCKS_ACCEPT_EULA", "BLOCKS_CLIENT_ENV", "BLOCKS_SWAY", "BLOCKS_COMPOSE_PROJECT", "BLOCKS_RUNTIME_IMAGE", "BLOCKS_POSTGRES_IMAGE")
     System.getenv().filterKeys { it.startsWith("BLOCKS_E2E_") || it in passed }.forEach { (k, v) -> environment(k, v) }
-    // real game clients (net.blocks168.e2e.client): the dev client's launch description, run directories
+    // real game clients (dev.vxcc.b8.e2e.client): the dev client's launch description, run directories
     if (e2e) {
         dependsOn(":mods:e2e-client:clientLaunch")
         environment("BLOCKS_E2E_CLIENT_LAUNCH", rootDir.resolve("mods/e2e-client/build/e2e-client/launch.json").absolutePath)
