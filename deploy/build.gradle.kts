@@ -42,6 +42,7 @@ fun nonTransitive(name: String) = configurations.create(name) {
 
 val velocityProxy = nonTransitive("velocityProxy")
 val velocityPlugins = nonTransitive("velocityPlugins")
+val networkPlugin = nonTransitive("networkPlugin")
 val fabricLauncher = nonTransitive("fabricLauncher")
 val lobbyMods = nonTransitive("lobbyMods")
 val survivalMods = nonTransitive("survivalMods")
@@ -55,6 +56,8 @@ val e2ePlugins = nonTransitive("e2ePlugins")
 dependencies {
     velocityProxy("${libs.versions.velocity.proxy.sha256.get()}:velocity:${libs.versions.velocity.asProvider().get()}-${libs.versions.velocity.proxy.build.get()}@jar")
     velocityPlugins(project(":velocity:example-plugin", "pluginJar"))
+    velocityPlugins(project(":velocity:network", "pluginJar"))
+    networkPlugin(project(":velocity:network", "pluginJar"))
     fabricLauncher("fabric-server-launcher:${libs.versions.minecraft.get()}/${libs.versions.fabric.loader.get()}:${libs.versions.fabric.installer.get()}@jar")
 
     // mods on every Fabric server
@@ -285,6 +288,13 @@ fun stageFabricServer(name: String, mods: Configuration, generatedWorld: Boolean
 val stageLobby = stageFabricServer("lobby", lobbyMods, generatedWorld = true)
 val stageSurvival = stageFabricServer("survival", survivalMods)
 
+// The network plugin's schema migrations, run as the database owner from the core (compose service
+// network-schema: java -cp network.jar ...NetworkSchemaKt)
+val stageNetworkSchema = tasks.register<Sync>("stageNetworkSchema") {
+    into(stageDir.map { it.dir("network-schema") })
+    from(networkPlugin) { rename { "network.jar" } }
+}
+
 val stageBackend = tasks.register<Sync>("stageBackend") {
     into(stageDir.map { it.dir("backend") })
     from(project(":backend").tasks.named("installDist"))
@@ -301,5 +311,5 @@ val stageDns = tasks.register<Sync>("stageDns") {
 tasks.register("stage") {
     group = "deploy"
     description = "Stages the compose network into deploy/build/stage"
-    dependsOn(stageEdges, stageLobby, stageSurvival, stageBackend, stageDns, wireguard)
+    dependsOn(stageEdges, stageLobby, stageSurvival, stageBackend, stageNetworkSchema, stageDns, wireguard)
 }
