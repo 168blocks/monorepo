@@ -23,9 +23,11 @@ include(":libs:api") // Kotlin Multiplatform backend API model, shared with the 
 // Services
 include(":backend") // Ktor
 include(":frontend") // Compose Multiplatform (web + desktop)
+include(":dns") // player DNS: PowerDNS remote backend on the edges in pgecs (docs/dns.md)
 
 // Velocity plugins
 include(":velocity:example-plugin") // Velocity plugin
+include(":velocity:network") // every edge: online players, cross-edge actions, drain, maintenance
 include(":velocity:e2e-agent") // dev only: proxy state over HTTP for the e2e tests
 
 // Network

@@ -1,5 +1,6 @@
 # Build and tests (./dev ./gradlew build) and the network's end-to-end tests (tools/network.sh test),
-# both through the Nix dev shell, as on a developer machine (AGENTS.md).
+# both through the Nix dev shell, as on a developer machine (AGENTS.md); and the hermetic Nix build
+# (nix flake check and the flake's packages).
 name: CI
 
 on:
@@ -57,6 +58,64 @@ jobs:
           path: |
             **/build/reports/
             **/build/test-results/
+          if-no-files-found: ignore
+
+  # The hermetic Nix build (AGENTS.md, nix/gradle.nix): `gradlew build` with all tests in the Nix
+  # sandbox and the flake's packages, from the locked dependencies in nix/gradle-deps.json, so the
+  # lock cannot rot unnoticed.
+  nix:
+    name: Nix flake check and packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Nix store cache
+        uses: nix-community/cache-nix-action@v6
+        with:
+          primary-key: nix-flake-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'nix/**') }}
+          restore-prefixes-first-match: nix-flake-${{ runner.os }}-
+          gc-max-store-size-linux: 6G
+          purge: true
+          purge-prefixes: nix-flake-${{ runner.os }}-
+          purge-created: 0
+          purge-primary-key: never
+
+      # A dependency missing from (or changed against) nix/gradle-deps.json shows up as a download
+      # that mitm-cache cannot serve, or as a hash mismatch of the cache itself.
+      # Each package is its own Gradle build in its own sandbox: more than two at once exhaust the
+      # runner's memory (the job gets killed).
+      - name: Packages
+        run: |
+          nix build -L --keep-going --no-link --max-jobs 2 \
+            .#backend .#frontend-web .#velocity-example-plugin .#libs \
+            .#postgres-image .#runtime-image 2>&1 | tee nix-build.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Flake check
+        run: |
+          nix flake check -L --keep-going 2>&1 | tee nix-check.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Hint on out-of-date dependency lock
+        if: failure()
+        run: |
+          if grep -E -q "Could not (resolve|find|GET|HEAD|download)|Received status code 404|hash mismatch in fixed-output derivation|Failed to (download|fetch)" nix-*.log 2>/dev/null; then
+            echo "::error file=nix/gradle-deps.json::nix/gradle-deps.json looks out of date (a download mitm-cache cannot serve, or a changed hash). Re-record it with \`nix run .#update-gradle-deps\` in the repository root and commit the JSON (AGENTS.md, Hermetic Nix build)."
+          else
+            echo "::error::The hermetic Nix build failed. If it is a missing dependency, re-record nix/gradle-deps.json with \`nix run .#update-gradle-deps\` (AGENTS.md, Hermetic Nix build)."
+          fi
+
+      - name: Upload Nix logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nix-logs
+          path: nix-*.log
           if-no-files-found: ignore
 
   network:

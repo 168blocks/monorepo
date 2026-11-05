@@ -18,7 +18,9 @@ prevent-client-proxy-connections = false
 player-info-forwarding-mode = "modern"
 forwarding-secret-file = "forwarding.secret"
 announce-forge = false
-kick-existing-players = false
+# the newest login wins, on this edge as across edges (velocity/network; Velocity itself only does
+# this in online mode, the plugin also in offline mode)
+kick-existing-players = true
 ping-passthrough = "disabled"
 sample-players-in-ping = false
 enable-player-address-logging = true
@@ -45,7 +47,8 @@ failover-on-unexpected-server-disconnect = true
 announce-proxy-commands = true
 log-command-executions = false
 log-player-connections = true
-accepts-transfers = false
+# drained edges transfer their players to another edge (velocity/network)
+accepts-transfers = true
 
 [query]
 enabled = false

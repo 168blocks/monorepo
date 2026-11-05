@@ -101,6 +101,7 @@
           postgresql = postgresFor pkgs;
           egglogWasm = egglogWasmFor pkgs "s";
           egglogRedline = egglogRedlineFor pkgs;
+          vodozemacJni = vodozemacJniFor pkgs;
         };
     in
     {
@@ -205,6 +206,30 @@
               Env = [ "PATH=/bin" ];
               Volumes."/var/lib/postgresql" = { };
               ExposedPorts."5432/tcp" = { };
+            };
+          };
+
+          # PowerDNS authoritative server for the player zone (deploy/compose.yaml: pdns, docs/dns.md). All
+          # answers come from the dns service through the remote backend; the config is mounted at
+          # /etc/pdns/pdns.conf (deploy/dns/pdns.conf).
+          pdns-image = pkgs.dockerTools.buildLayeredImage {
+            name = "localhost/168blocks/pdns";
+            # tag = content hash chosen by Nix (tools/network.sh reads it), so worktrees never share a tag
+            tag = null;
+            contents = [
+              pkgs.pdns
+              pkgs.dockerTools.fakeNss
+            ];
+            extraCommands = "mkdir -p tmp etc/pdns && chmod 1777 tmp";
+            config = {
+              Entrypoint = [
+                "${pkgs.pdns}/bin/pdns_server"
+                "--config-dir=/etc/pdns"
+              ];
+              ExposedPorts = {
+                "53/udp" = { };
+                "53/tcp" = { };
+              };
             };
           };
 
