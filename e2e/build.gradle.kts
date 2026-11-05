@@ -21,5 +21,6 @@ tasks.named<Test>("test") {
     useJUnitPlatform { if (!e2e) includeTags("unit") }
     // the network is outside Gradle's view: never consider a run up to date
     outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
     for (name in listOf("BLOCKS_E2E_EDGES", "BLOCKS_E2E_BACKEND")) System.getenv(name)?.let { environment(name, it) }
 }
