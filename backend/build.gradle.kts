@@ -13,7 +13,6 @@ application {
 dependencies {
     implementation(project(":libs:api"))
     implementation(project(":libs:pgecs"))
-    implementation(project(":libs:common"))
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.netty)
     implementation(libs.ktor.server.content.negotiation)

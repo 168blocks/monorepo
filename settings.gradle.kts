@@ -18,7 +18,6 @@ include(":libs:pgecs-ksp") // KSP processor: pgecs query infix relations and wri
 include(":libs:pgecs-lambda") // bytecode decompiler for pgecs query lambdas (where, select, orderBy, ...)
 include(":libs:pgecs-query") // pgecs query engine: planner, eqsat optimisation, SQL compiler, plan cache
 include(":libs:b8-util") // b8 modules on pgecs systems: expiry
-include(":libs:common") // JVM code shared by all server-side components (CBOR wire format, ...)
 include(":libs:api") // Kotlin Multiplatform backend API model, shared with the frontend
 
 // Services
