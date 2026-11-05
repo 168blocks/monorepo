@@ -13,6 +13,18 @@
 #   8080         backend (+ web frontend)
 #   8333         S3 API (SeaweedFS)
 #   28500-28502  e2e agents (dev only): velocity (edge 1), lobby, survival (BLOCKS_E2E_AGENT_PORT in the container)
+#
+# WireGuard, the same shape as production (design: https://claude.ai/artifact/WDswfCSv1YSxbGT7HWgtzd):
+#   core      owns the core host's network namespace and the hub's wg0 (10.168.0.1). PostgreSQL, the
+#             backend, S3 and the Fabric servers join it (network_mode: service:core) and talk over
+#             localhost; the host ports above are published on it.
+#   edge-N    edge Velocity proxies, each in its own namespace with its own wg0 (10.168.1.N) on `wan`,
+#             reaching the Fabric servers and PostgreSQL only at 10.168.0.1 through the tunnel.
+#   wan       stands in for the internet: edges, edge 3's filter and core's WireGuard UDP port. Nothing on
+#             core listens there except WireGuard (and the published backend/S3/e2e ports).
+# Keys and configs: deploy/build/wireguard (gradlew :deploy:wireguard, from deploy/wireguard/peers.toml).
+# Each wg0 needs NET_ADMIN and either the WireGuard kernel module or /dev/net/tun for wireguard-go
+# (nix/wg-up.sh picks one).
 # Images are tagged by their Nix store hash (BLOCKS_*_IMAGE), so worktrees on different versions of
 # flake.nix do not overwrite each other's images.
 name: blocks168
@@ -21,100 +33,141 @@ x-jvm: &jvm
   image: ${BLOCKS_RUNTIME_IMAGE:-localhost/168blocks/runtime:latest}
   working_dir: /srv
   restart: unless-stopped
-  environment: &jvm-env
-    PGECS_URL: jdbc:postgresql://postgres:5432/blocks
-    PGECS_USER: blocks
 
-# Edge Velocity proxies: players connect to them; each goes straight to the Fabric servers (no main
-# Velocity). Design: https://claude.ai/artifact/WDswfCSv1YSxbGT7HWgtzd
+# in the core namespace (network_mode: service:core): PostgreSQL over localhost
+x-core-env: &core-env
+  PGECS_URL: jdbc:postgresql://localhost:5432/blocks
+  PGECS_USER: blocks
+
+# a container with its own wg0 (nix/wg-up.sh)
+x-tunnel: &tunnel
+  cap_add: [NET_ADMIN]
+  devices: [/dev/net/tun]
+  networks: [wan]
+
+# Edge Velocity proxies: players connect to them; each goes straight to the Fabric servers through its
+# WireGuard tunnel (no main Velocity). PostgreSQL as blocks_edge, by tunnel address.
 x-edge: &edge
-  <<: *jvm
-  command: ["java", "-Xmx512M", "-jar", "velocity.jar"]
-  depends_on: [postgres]
+  <<: [*jvm, *tunnel]
+  command: ["wg-up", "java", "-Xmx512M", "-jar", "velocity.jar"]
+  depends_on: [core]
+
+x-edge-env: &edge-env
+  PGECS_URL: jdbc:postgresql://10.168.0.1:5432/blocks
+  PGECS_USER: blocks_edge
+  BLOCKS_WG_IMPL: ${BLOCKS_WG_IMPL:-auto} # kernel | userspace | auto (nix/wg-up.sh)
 
 services:
+  core:
+    # the core host: network namespace, hub wg0 (10.168.0.1, UDP 51820) and the published ports of the
+    # services that join it
+    <<: *tunnel
+    image: ${BLOCKS_RUNTIME_IMAGE:-localhost/168blocks/runtime:latest}
+    restart: unless-stopped
+    command: ["wg-up"]
+    environment:
+      BLOCKS_WG_IMPL: ${BLOCKS_WG_IMPL:-auto}
+    volumes: ["./build/wireguard/core:/etc/wireguard:ro,Z"]
+    ports:
+      - "127.0.0.1:${BLOCKS_BACKEND_PORT:-8080}:8080"
+      - "127.0.0.1:${BLOCKS_S3_PORT:-8333}:8333"
+      - "127.0.0.1:${BLOCKS_LOBBY_AGENT_PORT:-28501}:8766"
+      - "127.0.0.1:${BLOCKS_SURVIVAL_AGENT_PORT:-28502}:8767"
+
   postgres:
     # PostgreSQL 18 with pg_jsonschema (required by pgecs), built by Nix (flake.nix: postgres-image)
     image: ${BLOCKS_POSTGRES_IMAGE:-localhost/168blocks/postgres:latest}
     restart: unless-stopped
-    # No passwords and no host port: only containers on this compose network can connect, as role
-    # `blocks`; see nix/postgres-entrypoint.sh. Admin: `tools/network.sh psql`.
+    network_mode: service:core
+    # No passwords and no host port: listens on localhost and 10.168.0.1 only; role by source address
+    # (localhost: blocks, edge tunnels: blocks_edge), see nix/postgres-entrypoint.sh.
+    # Admin: `tools/network.sh psql`.
     environment:
       POSTGRES_DB: blocks
     volumes:
       - postgres:/var/lib/postgresql
+    depends_on: [core]
     # no healthcheck: podman runs those through systemd timers, which not every host has. The
     # services retry their database connection instead (PgEcs.connect with retry).
 
   s3:
-    # backups and replays; any S3-compatible store works in production
+    # backups and replays; any S3-compatible store works in production. The volume server moves off
+    # 8080 (the backend's port in the shared namespace).
     image: docker.io/chrislusf/seaweedfs:4.52
     restart: unless-stopped
-    command: ["server", "-dir=/data", "-s3", "-s3.port=8333", "-master.volumeSizeLimitMB=1024"]
+    network_mode: service:core
+    command: ["server", "-dir=/data", "-s3", "-s3.port=8333", "-volume.port=8380", "-master.volumeSizeLimitMB=1024"]
     volumes:
       - s3:/data
-    ports: ["127.0.0.1:${BLOCKS_S3_PORT:-8333}:8333"]
+    depends_on: [core]
 
   backend:
     <<: *jvm
+    network_mode: service:core
     # straight to the JVM (the installDist start script needs a full POSIX userland)
     command: ["java", "-cp", "lib/*", "net.blocks168.backend.MainKt"]
     environment:
-      <<: *jvm-env
+      <<: *core-env
       BLOCKS_HTTP_PORT: "8080"
       BLOCKS_FRONTEND_DIR: /srv/web
-      BLOCKS_S3_ENDPOINT: http://s3:8333
+      BLOCKS_S3_ENDPOINT: http://localhost:8333
     volumes: ["./build/stage/backend:/srv:ro,Z"]
-    ports: ["127.0.0.1:${BLOCKS_BACKEND_PORT:-8080}:8080"]
-    depends_on: [postgres]
+    depends_on: [core, postgres]
 
+  # Fabric servers: bind only 10.168.0.1 (server-ip, deploy/fabric/<name>), so they wait for core's wg0
   lobby:
     <<: *jvm
-    command: ["java", "-Xmx2G", "-jar", "fabric-server-launch.jar", "nogui"]
+    network_mode: service:core
+    command: ["wg-up", "--wait", "10.168.0.1", "java", "-Xmx2G", "-jar", "fabric-server-launch.jar", "nogui"]
     environment:
-      <<: *jvm-env
+      <<: *core-env
       BLOCKS_SERVER_ID: lobby
-      BLOCKS_E2E_AGENT_PORT: "8765" # mods/e2e-agent (dev only)
+      BLOCKS_E2E_AGENT_PORT: "8766" # mods/e2e-agent (dev only), published on core
     volumes: ["./build/stage/lobby:/srv:Z"]
-    ports: ["127.0.0.1:${BLOCKS_LOBBY_AGENT_PORT:-28501}:8765"]
-    depends_on: [postgres]
+    depends_on: [core, postgres]
 
   survival:
     <<: *jvm
-    command: ["java", "-Xmx4G", "-jar", "fabric-server-launch.jar", "nogui"]
+    network_mode: service:core
+    command: ["wg-up", "--wait", "10.168.0.1", "java", "-Xmx4G", "-jar", "fabric-server-launch.jar", "nogui"]
     environment:
-      <<: *jvm-env
+      <<: *core-env
       BLOCKS_SERVER_ID: survival
-      BLOCKS_E2E_AGENT_PORT: "8765" # mods/e2e-agent (dev only)
+      BLOCKS_E2E_AGENT_PORT: "8767" # mods/e2e-agent (dev only), published on core
     volumes: ["./build/stage/survival:/srv:Z"]
-    ports: ["127.0.0.1:${BLOCKS_SURVIVAL_AGENT_PORT:-28502}:8765"]
-    depends_on: [postgres]
+    depends_on: [core, postgres]
 
   edge-1:
     <<: *edge
     environment:
-      <<: *jvm-env
+      <<: *edge-env
       BLOCKS_E2E_AGENT_PORT: "8765" # velocity/e2e-agent (dev only), published for edge 1
-    volumes: ["./build/stage/edge-1:/srv:Z"]
+    volumes: ["./build/stage/edge-1:/srv:Z", "./build/wireguard/edge-1:/etc/wireguard:ro,Z"]
     ports:
       - "127.0.0.1:${BLOCKS_EDGE1_PORT:-25501}:25565"
       - "127.0.0.1:${BLOCKS_VELOCITY_AGENT_PORT:-28500}:8765"
   edge-2:
     <<: *edge
-    volumes: ["./build/stage/edge-2:/srv:Z"]
+    environment: *edge-env
+    volumes: ["./build/stage/edge-2:/srv:Z", "./build/wireguard/edge-2:/etc/wireguard:ro,Z"]
     ports: ["127.0.0.1:${BLOCKS_EDGE2_PORT:-25502}:25565"]
   edge-3:
     # behind edge-3-filter (haproxy-protocol = true); not published itself
     <<: *edge
-    volumes: ["./build/stage/edge-3:/srv:Z"]
+    environment: *edge-env
+    volumes: ["./build/stage/edge-3:/srv:Z", "./build/wireguard/edge-3:/etc/wireguard:ro,Z"]
   edge-3-filter:
     # stands in for an L4 DDoS filter: PROXY protocol v2 to edge 3
     image: docker.io/library/haproxy:3.2-alpine
     restart: unless-stopped
+    networks: [wan]
     volumes:
       - ./edge-filter/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro,Z
     ports: ["127.0.0.1:${BLOCKS_EDGE3_PORT:-25503}:25565"]
     depends_on: [edge-3]
+
+networks:
+  wan:
 
 volumes:
   postgres:
