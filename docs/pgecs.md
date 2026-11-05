@@ -394,7 +394,7 @@ Every lambda pgecs needs to translate, in `where { }`, `select { }`, `orderBy { 
 ### Pipeline
 
 1. **DSL calls** record an AST. Predicate lambdas are decompiled and merged in. Everything is checked against the registry: an unknown component, a wrong field, or a predicate on a tag is an error when the query is first built.
-2. **IR**: a term graph. Nodes are variables (entity or value), edges are terms, and each term knows its source.
+2. **IR**: a term graph. Nodes are variables (entity or value), edges are terms, and each term knows its source. Implemented in `libs/pgecs-ir`; its README describes the model, semantics and cache key.
 3. **Logical plan**: relational operators, `Scan(rel, target)`, `Join`, `SemiJoin`, `AntiJoin`, `LeftJoin`, `Filter`, `Project`, `Aggregate`, `Sort`, `Limit`.
 4. **Optimisation** with equality saturation (below).
 5. **Physical plan** per source. For Postgres that is SQL.
@@ -644,7 +644,8 @@ ecs.readAsync { q.fetch() }.thenAccept { ids -> server.execute { show(ids) } }
 
 | Module | Contents |
 | --- | --- |
-| `pgecs-core` | Model, registry, IR, planner, query cache, systems, outbox API |
+| `pgecs-core` | Model, registry, planner, query cache, systems, outbox API |
+| `pgecs-ir` | First-level query IR, validation, canonical form and shape fingerprint (`libs/pgecs-ir`) |
 | `pgecs-postgres` | Base schema, triggers, freeze, SQL compiler, tx runner, outbox worker |
 | `pgecs-lambda` | Bytecode decompiler for lambdas (Java classfile API) |
 | `pgecs-ksp` | KSP processor: module registries, infix relations, write accessors |
