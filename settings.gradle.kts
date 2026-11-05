@@ -16,6 +16,7 @@ include(":libs:pgecs-ir") // first-level query IR of pgecs (DSL in, planner and 
 include(":libs:pgecs-eqsat") // equality saturation (egglog on Endive) for the pgecs query planner
 include(":libs:pgecs-ksp") // KSP processor: pgecs query infix relations and write accessors
 include(":libs:pgecs-lambda") // bytecode decompiler for pgecs query lambdas (where, select, orderBy, ...)
+include(":libs:pgecs-query") // pgecs query engine: planner, eqsat optimisation, SQL compiler, plan cache
 include(":libs:common") // JVM code shared by all server-side components (CBOR wire format, ...)
 include(":libs:api") // Kotlin Multiplatform backend API model, shared with the frontend
 

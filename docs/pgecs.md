@@ -136,8 +136,9 @@ create unique index concurrently ecs_x_child_of on ecs_component (entity)
 -- Opt-in GIN for one component with rich nested values
 create index concurrently ecs_g_player_settings on ecs_component using gin (value jsonb_path_ops)
   where rel = 'b8:mc:player-settings:v1';
--- Range scans for expiry (value is epoch millis via InstantAsEpochMillis)
-create index concurrently ecs_i_expires_slow on ecs_component ((value::bigint), entity)
+-- Range scans for expiry (value is epoch millis via InstantAsEpochMillis). The expression must be
+-- exactly what the compiler renders for the field (SqlCompiler.fieldSql), or Postgres ignores it.
+create index concurrently ecs_i_expires_slow on ecs_component ((((value #>> '{}'))::bigint), entity)
   where rel = 'b8:util:expires-slow:v1';
 ```
 
@@ -443,7 +444,7 @@ Two compiler rules matter for performance:
 - **Component names are inlined as literals**, values are bind parameters. Postgres only uses a partial index (`where rel = 'b8:iam:email:v1'`) when the literal is visible at plan time. Names are safe to inline because they come from the catalog and match a strict pattern.
 - **Index expressions are matched, never invented.** The compiler emits the SQL that the predicate literally means. When that SQL equals a declared index expression, Postgres uses the index. The compiler never rewrites a predicate into an index form with different semantics.
 
-Per-`rel` row estimates come from `pg_stats` on `ecs_component.rel` (most common values and frequencies times `pg_class.reltuples`), which `ANALYZE` keeps current at no cost, because the single-table layout hides per-component cardinality from Postgres' own per-table statistics.
+Row counts per `rel` feed cost estimates, because the single-table layout hides per-component cardinality from Postgres' own plans. They come from `pg_stats` (most common values of `ecs_component.rel`, times `pg_class.reltuples`), which `ANALYZE` keeps current at no cost (the engine rereads them every minute); no extra view or table. A plan is rebuilt when a component's count drifts by more than 10x (and at least 1000 rows). The compiler orders joins itself (greedy, from these counts) and Postgres still picks join algorithms and indexes.
 
 ### Optimizer and equality saturation
 
@@ -453,7 +454,7 @@ The optimizer runs equality saturation with egglog inside the JVM through [Endiv
 - **Runtime.** [egglog](https://github.com/egraphs-good/egglog) (Rust, MIT) compiled to `wasm32-wasip1`, run by Endive (a JVM-native Wasm runtime from the Bytecode Alliance, Apache-2.0) with its build-time (AOT) compiler.
 - **Interface.** The logical plan is serialized as egglog terms. Rules are written in egglog: a core set from pgecs, and one set per source (for example, Minecraft `near` pushdown or bind-join preferences). Per-source cost estimates drive extraction, and the extracted term is parsed back into the plan.
 - **Off the game thread.** Optimisation always runs on a pgecs compile executor, never on a game thread. A new shape reached through `txAsync` / `readAsync` compiles in the background and its future completes afterwards. A blocking call on a non-game thread waits for the compile.
-- **Bounded.** Saturation runs with node, iteration and time limits, and the best plan found so far is used if a limit hits. If egglog cannot run at all, a fixed-point pass over the core rules produces a correct, possibly slower plan.
+- **Bounded.** The core rules (`libs/pgecs-query`, `opt/core.egg`) rewrite predicates only: boolean simplification, De Morgan, negation into comparisons, contradictions only for predicates that are never null, removal of probes that a scan already guarantees, and merging probes of one entity into `rel in (...)`. They run as `(repeat 8 (run core))`, not to saturation. A compile waits at most 250 ms for egglog; after that it uses the Kotlin simplifier's plan (the same rules as a fixed-point pass) and swaps in egglog's plan when it arrives. If egglog cannot run at all, the simplifier's plan stays. egglog's text interface only extracts with static costs, so join order is chosen in Kotlin, not by extraction.
 - **Spike results.** egglog 3.0.0 builds unmodified for `wasm32-wasip1` and runs under Endive 1.2.0 on Java 25 through a reactor ABI (`alloc`, `run`, `out_ptr`, `out_len`). Instances are not thread-safe, so pgecs keeps a small pool. Chosen setup: Endive AOT, egglog built with Rust `opt-level = "s"` (smaller functions JIT far better; `wasm-opt -O3` is 4x worse), a contiguous `byte[]` linear memory (a \~150-line `FlatMemory` instead of Endive's paged memory), `-XX:-DontCompileHugeMethods`, and a persistent e-graph per pooled instance (rules loaded once, push/pop per query; egglog's `pop` leaks ~20 KiB per query, so the pool rebuilds each session every 200 queries). One optimisation of a 4-way join then takes about 22 ms in steady state, about 5x native egglog (4.3 ms) and 3x wasmtime. Warm-up is long: the first query takes \~0.6 s, runs 50 to 100 average \~55 ms, and steady state comes after \~400 runs. JIT code is shared across instances, so a warm-up on one instance at startup warms them all. The JDK 25 AOT cache only helps the first few dozen runs. Bounded rule schedules instead of full saturation are the next lever, more than further runtime tuning. That flag applies to the whole JVM, including Minecraft's code. Spike write-up and follow-up: #16, #18.
 
 ### Query compilation cache
@@ -656,10 +657,11 @@ ecs.readAsync { q.fetch() }.thenAccept { ids -> server.execute { show(ids) } }
 | --- | --- |
 | `pgecs-core` | Model, registry, planner, query cache, systems, outbox API |
 | `pgecs-ir` | First-level query IR, validation, canonical form and shape fingerprint (`libs/pgecs-ir`) |
+| `pgecs-query` | Query engine (`libs/pgecs-query`): lowering of the IR to a logical plan, eqsat optimisation, SQL compiler, Caffeine plan cache, hot shapes, execution |
 | `pgecs-postgres` | Base schema, triggers, freeze, SQL compiler, tx runner, outbox worker |
 | `pgecs-lambda` | Bytecode decompiler for lambdas (Java classfile API) |
 | `pgecs-ksp` | KSP processor: module registries, infix relations, write accessors |
-| `pgecs-eqsat` | egglog compiled to `wasm32-wasip1`, run by Endive AOT, plus core rules (`libs/pgecs-eqsat`: runtime and pool exist, core rules not yet) |
+| `pgecs-eqsat` | egglog compiled to `wasm32-wasip1`, run by Endive AOT, run by `libs/pgecs-query` with its core rules (`libs/pgecs-eqsat`) |
 | `pgecs-fabric` | Minecraft source, game-thread registration, endpoints per `MinecraftServer`, presence |
 | `pgecs-memory` | Ephemeral in-memory archetype ECS (later) |
 
