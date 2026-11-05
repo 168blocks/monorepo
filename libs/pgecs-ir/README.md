@@ -74,7 +74,9 @@ same query up to argument values. The shape is the key of the plan cache (layer 
 
 * `equals`/`hashCode` are structural, and the hash is computed once per instance.
 * `canonicalText` is a versioned s-expression of exactly the shape, and `fingerprint` its SHA-256:
-  stable across JVMs, for recording hot shapes across restarts.
+  stable across JVMs, for recording hot shapes across restarts. `Canonical.parse` reads the text back
+  (`parse(render(q)) == q`), so recorded shapes can be precompiled at the next startup; text from
+  another format version is rejected.
 * Part of the shape: component names, kinds, value types and sources (names are inlined in SQL, so
   partial indexes apply), variable names (they show in plans), types, term order, the builder's
   conditional terms (`if (strict) acc has !LobbyDenied` gives two shapes).

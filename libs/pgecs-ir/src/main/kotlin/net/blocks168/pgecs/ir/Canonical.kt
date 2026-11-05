@@ -64,6 +64,14 @@ object Canonical {
         append("))")
     }
 
+    /**
+     * Reads canonical text back into the query it was rendered from: `parse(render(q)) == q`.
+     * Throws [CanonicalParseException] on malformed text or a different [VERSION] (a shape recorded
+     * by an older library is simply recompiled from its call site instead). Does not validate.
+     */
+    @JvmStatic
+    fun parse(text: String): QueryIr = CanonicalParser.parse(text)
+
     /** SHA-256 of [text] as UTF-8, lower-case hex. */
     @JvmStatic
     fun fingerprint(text: String): String =
