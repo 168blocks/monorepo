@@ -140,6 +140,7 @@ class GameClients(
             "renderDistance" to "4",
             "simulationDistance" to "5",
             "renderClouds" to "\"false\"",
+            "chunkSectionFadeInTime" to "0.0", // sections appear at once: a frame shows them fully or not at all
             "fullscreen" to "false",
         )
         val existing = if (file.exists()) file.readText().lines().filter { it.isNotBlank() } else emptyList()

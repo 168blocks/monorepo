@@ -46,10 +46,11 @@ class Screenshot(val file: Path, val image: BufferedImage) {
     /** Blank: one colour almost everywhere, or hardly any contrast (black, a clear colour, a fog wall). */
     fun isBlank(): Boolean = dominantColorShare() > 0.95 || luminanceStdDev() < 0.02
 
+    /** Dominant colour share and luminance spread, for messages. */
+    fun describe() = "dominant colour ${"%.3f".format(dominantColorShare())}, luminance stddev ${"%.4f".format(luminanceStdDev())}"
+
     fun assertNotBlank() = apply {
-        check(!isBlank()) {
-            "screenshot $file is blank (dominant colour ${"%.3f".format(dominantColorShare())}, luminance stddev ${"%.4f".format(luminanceStdDev())})"
-        }
+        check(!isBlank()) { "screenshot $file is blank (${describe()})" }
     }
 
     /**
