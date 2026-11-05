@@ -18,7 +18,12 @@ import kotlin.system.exitProcess
  * The bot must be invited to the channel's server (OAuth2 → URL Generator, scope `bot`, permission
  * Send Messages); a DM only arrives if the user shares a server with the bot.
  */
-fun main() = runBlocking {
+fun main() {
+    runBlocking { sendExamples() }
+    exitProcess(0) // Kord's HTTP client keeps non-daemon threads alive
+}
+
+private suspend fun sendExamples() {
     val config = DiscordConfig.fromEnv() ?: run {
         System.err.println("set ${DiscordConfig.TOKEN_ENV} to the bot token")
         exitProcess(2)
@@ -33,5 +38,4 @@ fun main() = runBlocking {
     val bot = DiscordBot(config)
     if (channel != null) println("channel message: ${bot.sendChannelMessage(channel, "Hello from the 168blocks backend!")}")
     if (user != null) println("direct message: ${bot.sendDirectMessage(user, "Hello from the 168blocks backend, just for you.")}")
-    exitProcess(0) // Kord's HTTP client keeps non-daemon threads alive
 }
