@@ -10,7 +10,7 @@ postgresql = "42.7.14"
 hikaricp = "7.1.0"
 junit = "6.1.3"
 caffeine = "3.3.1" # pgecs plan cache
-endive = "1.2.0" # JVM Wasm runtime for egglog (libs/pgecs-eqsat)
+endive = "1.2.0" # JVM Wasm runtime for egglog (libs/pgecs-eqsat); keep nix/egglog-redline.nix on the same version
 # Matrix bot (backend). vodozemac is built to wasm by Nix (nix/vodozemac-wasm.nix): bump its
 # tag together with trixnity (vodozemac-tag in Trixnity's gradle/libs.versions.toml).
 trixnity = "5.10.1"
@@ -73,6 +73,7 @@ endive-runtime = { module = "run.endive:runtime", version.ref = "endive" }
 endive-wasi = { module = "run.endive:wasi", version.ref = "endive" }
 asm = { module = "org.ow2.asm:asm", version = "9.10.1" } # build-time rewrite of trixnity-vodozemac-jvm
 endive-build-time-compiler = { module = "run.endive:build-time-compiler", version.ref = "endive" }
+endive-redline-runner = { module = "run.endive:redline-runner-experimental", version.ref = "endive" }
 kord-rest = { module = "dev.kord:kord-rest", version.ref = "kord" }
 
 trixnity-bom = { module = "de.connect2x.trixnity:trixnity-bom", version.ref = "trixnity" }

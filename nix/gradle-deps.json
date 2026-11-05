@@ -4442,6 +4442,17 @@
    "jar": "sha256-eKnZUfFVuljTQXyk9zwlHkKbgsp22xn/q7xlaK399OE=",
    "pom": "sha256-LlCsOF2RKA1rqpNPpkurIWoEK4w6zEQ4cTsQf7+/r/s="
   },
+  "run/endive#redline-api-experimental/1.2.0": {
+   "jar": "sha256-XLM1YPHKN8KnRvXqjSRnb5/yilKZFBm3+qm3RYOMUZo=",
+   "pom": "sha256-yKmbW/3LkQ9foh1KTNTKEzMfG+IFnNxqr0B9GWU0Od0="
+  },
+  "run/endive#redline-parent-experimental/1.2.0": {
+   "pom": "sha256-FI2hblIDjDhkuusKtWZFXuiYHDF/et5m/tglUCTwyto="
+  },
+  "run/endive#redline-runner-experimental/1.2.0": {
+   "jar": "sha256-KPMHfEeHDaCVJjK9klYXWgOquyGK2AQtF6KZyUf7fjg=",
+   "pom": "sha256-cItPQ/4g9ci7NjpTu77Fw7GjE7aNzYZSKD4noT1/dwk="
+  },
   "run/endive#runtime/1.2.0": {
    "jar": "sha256-NgwusW3EPV4Ffd/n0WLM7XAQ0l770yxvhRUCMw1O/mc=",
    "pom": "sha256-xGeIEB5iQLzEEEkXx5L/+pZEz3qg+HPAP6aDOxhysZ4="

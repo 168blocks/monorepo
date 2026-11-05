@@ -37,7 +37,17 @@
         pg.withPackages (_: [ pg_jsonschema ]);
 
       # egglog as wasm32-wasip1 for libs/pgecs-eqsat (Endive compiles it to JVM classes)
-      egglogWasmFor = pkgs: (pkgs.extend rust-overlay.overlays.default).callPackage ./nix/egglog-wasm.nix { };
+      egglogWasmFor =
+        pkgs: optLevel:
+        (pkgs.extend rust-overlay.overlays.default).callPackage ./nix/egglog-wasm.nix { inherit optLevel; };
+
+      # egglog as native code (Endive's Redline, Cranelift) from the opt-level 3 build; slow, see the file
+      egglogRedlineFor =
+        pkgs:
+        pkgs.callPackage ./nix/egglog-redline.nix {
+          jdk = jdkFor pkgs;
+          egglogWasm = egglogWasmFor pkgs 3;
+        };
 
       # vodozemac's JNI library for Trixnity, built against the same glibc as Nix's JDK. The backend uses
       # the wasm build below instead; this one stays for speed comparisons (docs/matrix-bot.md)
@@ -92,7 +102,8 @@
         pkgs.callPackage ./nix/gradle.nix {
           jdk = jdkFor pkgs;
           postgresql = postgresFor pkgs;
-          egglogWasm = egglogWasmFor pkgs;
+          egglogWasm = egglogWasmFor pkgs "s";
+          egglogRedline = egglogRedlineFor pkgs;
           vodozemacWasm = vodozemacWasmFor pkgs;
         };
     in
@@ -137,7 +148,8 @@
               export BLOCKS_NODE=${pkgs.nodejs_24}/bin/node
               export BLOCKS_BINARYEN=${pkgs.binaryen}
               export BLOCKS_BASH=${pkgs.bashInteractive}/bin/bash
-              export BLOCKS_EGGLOG_WASM=${egglogWasmFor pkgs}/egglog.wasm
+              export BLOCKS_EGGLOG_WASM=${egglogWasmFor pkgs "s"}/egglog.wasm
+              export BLOCKS_EGGLOG_REDLINE=${egglogRedlineFor pkgs}
               export BLOCKS_VODOZEMAC_WASM=${vodozemacWasmFor pkgs}/vodozemac.wasm
               # throwaway Matrix homeserver for the backend's Matrix bot tests (TestHomeserver)
               export BLOCKS_MATRIX_TEST_HOMESERVER=${pkgs.matrix-tuwunel}/bin/tuwunel
@@ -168,7 +180,8 @@
 
           postgresql = postgresFor pkgs;
 
-          egglog-wasm = egglogWasmFor pkgs;
+          egglog-wasm = egglogWasmFor pkgs "s";
+          egglog-redline = egglogRedlineFor pkgs;
 
           vodozemac-jni = vodozemacJniFor pkgs;
 

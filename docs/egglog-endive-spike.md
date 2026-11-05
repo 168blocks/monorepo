@@ -127,3 +127,37 @@ needle more than runtime tuning now.
 - JVM: `-XX:-DontCompileHugeMethods`, tiered compilation on (default), warm up at startup.
 - API: persistent e-graph per instance, rules loaded once, `(push)`/`(pop)` per query; pool instances per thread.
 
+## Round 3: Redline (Cranelift native AOT)
+
+Endive 1.2.0 ships an experimental backend, Redline. At build time the Maven plugin
+(`<redlineExperimental>true</redlineExperimental>`) runs Cranelift (itself compiled to wasm and run on Endive)
+to produce native code per platform. At runtime `redline-runner-experimental` (Panama FFM, Java 25)
+loads it. The bytecode AOT is still generated and is used automatically on unsupported platforms.
+egglog needed no changes: it uses no SIMD, exceptions or multi-memory.
+
+| Config | First query | Steady state median | Persistent e-graph | Startup (instantiate) | Peak RSS |
+|---|---|---|---|---|---|
+| Redline, Rust opt-level 3 | 20 ms | **12.4 ms** | **11.4 ms** | ~0.9 s | ~290 MB |
+| Redline, Rust opt-level "s" | 22 ms | 16.1 ms | 15.2 ms | ~0.9 s | ~290 MB |
+| Bytecode AOT, best config (round 2) | ~600 ms | 26 ms | 22 ms | 0.3 s | ~200 MB |
+| wasmtime 50 (opt 3 / "s") | n/a | 6.8 / 7.9 ms | 6.1 / 7.3 ms | n/a | 159 MB |
+| native egglog | n/a | 4.3 ms | 4.4 ms | n/a | 9 MB |
+
+- **No warm-up.** Per-run medians are flat from the first 10 runs (13 ms) onward. This removes the
+  biggest operational problem of the bytecode backend.
+- Unlike the bytecode backend, **Redline prefers opt-level 3** (inlining is fine for native code).
+- Remaining gap to wasmtime is ~2x. It is not WASI overhead: egglog calls `clock_time_get` ~700 times
+  per query, but swapping in a minimal clock changed nothing. It is most likely Cranelift codegen
+  settings or bounds checking in Redline.
+- Linear memory lives off-heap, so `FlatMemory` doesn't apply. The JVM heap stays small (~40 MB).
+
+Costs and risks:
+- **Build time:** ~15 min per target platform for the 5 MB egglog module on 4 cores (32 min for 3
+  targets). Cranelift runs inside Endive at build time. Rebuild only when the wasm changes, e.g. cache
+  the generated classes in CI, or publish them as a separate artifact.
+- **Size:** ~25-31 MB of native code per platform in the jar (x86_64-linux 31 MB, aarch64 25 MB).
+- **Experimental:** Endive labels it so. Needs `--enable-native-access=ALL-UNNAMED` to avoid warnings
+  (and future JDKs will require it). Native code runs outside the JVM's memory safety; the bytecode
+  fallback is always there (`EgglogModule.safeBuilder()`).
+- Supported: Linux/macOS/Windows on x86_64 and aarch64.
+
