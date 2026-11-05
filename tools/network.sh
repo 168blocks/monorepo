@@ -79,6 +79,6 @@ case "$cmd" in
   logs) compose logs "$@" ;;
   ps) compose ps ;;
   psql) # psql as the postgres superuser inside the database container (peer auth, no password)
-    exec podman exec -it "${BLOCKS_COMPOSE_PROJECT}_postgres_1" psql -h /run/postgresql -U postgres -d blocks "$@" ;;
+    exec podman exec -it --user postgres "${BLOCKS_COMPOSE_PROJECT}_postgres_1" psql -h /run/postgresql -U postgres -d blocks "$@" ;;
   *) sed -n '2,18p' "$0"; exit 2 ;;
 esac
