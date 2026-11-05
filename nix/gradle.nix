@@ -86,8 +86,10 @@ let
       installPhase = "touch $out";
     };
     data = ./gradle-deps.json;
-    # the update runs the tests too; initdb needs the user in /etc/passwd
-    bwrapFlags = ''--ro-bind "$PWD" "$PWD" --ro-bind /etc/passwd /etc/passwd --ro-bind /etc/group /etc/group'';
+    # the update runs the tests too; initdb needs the user in /etc/passwd, and bash as /bin/sh: under
+    # proot (TestPostgres' fallback without a usable /bin/sh), initdb fails now and then when many test
+    # JVMs start PostgreSQL at once
+    bwrapFlags = ''--ro-bind "$PWD" "$PWD" --ro-bind /etc/passwd /etc/passwd --ro-bind /etc/group /etc/group --ro-bind ${bashInteractive}/bin/bash /bin/sh'';
   };
 
   mkGradle =
