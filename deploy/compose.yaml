@@ -1,0 +1,106 @@
+# The whole 168blocks network on one machine, for development and end-to-end tests.
+#
+#   tools/network.sh up       build, stage and start (see the script for details)
+#   tools/network.sh test     ... and run the end-to-end tests (e2e/)
+#   tools/network.sh down
+#
+# JVM services run in the Nix-built runtime image (flake.nix: packages.runtime-image) and mount their
+# staged files (./build/stage/<service>, from `gradlew :deploy:stage`) at /srv.
+#
+# Host ports (all on 127.0.0.1):
+#   25501-25503  edge proxies 1-3 (what players connect to)
+#   8080         backend (+ web frontend)
+#   55432        PostgreSQL (5432 is often taken by a host PostgreSQL)
+#   8333         S3 API (SeaweedFS)
+name: blocks168
+
+x-jvm: &jvm
+  image: localhost/168blocks/runtime:latest
+  working_dir: /srv
+  restart: unless-stopped
+  environment: &jvm-env
+    PGECS_URL: jdbc:postgresql://postgres:5432/blocks
+    PGECS_USER: blocks
+    PGECS_PASSWORD: blocks-dev
+
+x-edge: &edge
+  image: docker.io/library/haproxy:3.2-alpine
+  restart: unless-stopped
+  volumes:
+    - ./edge/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro,Z
+  depends_on: [velocity]
+
+services:
+  postgres:
+    # PostgreSQL 18 with pg_jsonschema (required by pgecs), built by Nix (flake.nix: postgres-image)
+    image: localhost/168blocks/postgres:latest
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: blocks
+      POSTGRES_USER: blocks
+      POSTGRES_PASSWORD: blocks-dev
+    volumes:
+      - postgres:/var/lib/postgresql
+    ports: ["127.0.0.1:55432:5432"]
+    # no healthcheck: podman runs those through systemd timers, which not every host has. The
+    # services retry their database connection instead (PgEcs.connect with retry).
+
+  s3:
+    # backups and replays; any S3-compatible store works in production
+    image: docker.io/chrislusf/seaweedfs:4.52
+    restart: unless-stopped
+    command: ["server", "-dir=/data", "-s3", "-s3.port=8333", "-master.volumeSizeLimitMB=1024"]
+    volumes:
+      - s3:/data
+    ports: ["127.0.0.1:8333:8333"]
+
+  backend:
+    <<: *jvm
+    # straight to the JVM (the installDist start script needs a full POSIX userland)
+    command: ["java", "-cp", "lib/*", "net.blocks168.backend.MainKt"]
+    environment:
+      <<: *jvm-env
+      BLOCKS_HTTP_PORT: "8080"
+      BLOCKS_FRONTEND_DIR: /srv/web
+      BLOCKS_S3_ENDPOINT: http://s3:8333
+    volumes: ["./build/stage/backend:/srv:ro,Z"]
+    ports: ["127.0.0.1:8080:8080"]
+    depends_on: [postgres]
+
+  velocity:
+    <<: *jvm
+    command: ["java", "-Xmx512M", "-jar", "velocity.jar"]
+    volumes: ["./build/stage/velocity:/srv:Z"]
+    depends_on: [postgres]
+
+  lobby:
+    <<: *jvm
+    command: ["java", "-Xmx2G", "-jar", "fabric-server-launch.jar", "nogui"]
+    environment:
+      <<: *jvm-env
+      BLOCKS_SERVER_ID: lobby
+    volumes: ["./build/stage/lobby:/srv:Z"]
+    depends_on: [postgres]
+
+  survival:
+    <<: *jvm
+    command: ["java", "-Xmx4G", "-jar", "fabric-server-launch.jar", "nogui"]
+    environment:
+      <<: *jvm-env
+      BLOCKS_SERVER_ID: survival
+    volumes: ["./build/stage/survival:/srv:Z"]
+    depends_on: [postgres]
+
+  edge-1:
+    <<: *edge
+    ports: ["127.0.0.1:25501:25565"]
+  edge-2:
+    <<: *edge
+    ports: ["127.0.0.1:25502:25565"]
+  edge-3:
+    <<: *edge
+    ports: ["127.0.0.1:25503:25565"]
+
+volumes:
+  postgres:
+  s3:

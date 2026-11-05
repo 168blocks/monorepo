@@ -1,0 +1,5 @@
+motd=168blocks lobby
+level-name=world
+gamemode=adventure
+level-type=minecraft\:flat
+generate-structures=false

@@ -1,0 +1,28 @@
+pluginManagement {
+    includeBuild("build-logic")
+    repositories {
+        maven("https://maven.fabricmc.net/") { name = "Fabric" }
+        mavenCentral()
+        gradlePluginPortal()
+        google()
+    }
+}
+
+rootProject.name = "168blocks"
+
+// Shared libraries
+include(":libs:pgecs") // ACID persistent ECS on PostgreSQL (backend, mods, Velocity plugins)
+include(":libs:common") // JVM code shared by all server-side components (CBOR wire format, ...)
+include(":libs:api") // Kotlin Multiplatform backend API model, shared with the frontend
+
+// Services
+include(":backend") // Ktor
+include(":frontend") // Compose Multiplatform (web + desktop)
+
+// Minecraft
+include(":mods:example-common") // Fabric mod (Kotlin + Java mixins), server and client
+include(":velocity:example-plugin") // Velocity plugin
+
+// Network
+include(":deploy") // stages the podman compose network (deploy/compose.yaml)
+include(":e2e") // end-to-end tests against the running network

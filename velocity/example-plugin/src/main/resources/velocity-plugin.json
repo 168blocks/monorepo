@@ -1,0 +1,9 @@
+{
+  "id": "blocks168-example",
+  "name": "168blocks Example",
+  "version": "${version}",
+  "description": "Example 168blocks Velocity plugin",
+  "authors": ["168blocks"],
+  "dependencies": [],
+  "main": "net.blocks168.velocity.example.ExamplePlugin"
+}

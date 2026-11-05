@@ -1,0 +1,5 @@
+#!/bin/sh
+# Run a command inside the Nix dev shell (flake.nix) with a clean library environment.
+# Usage: ./dev ./gradlew build
+cd "$(dirname "$0")" || exit 1
+exec env -u LD_LIBRARY_PATH -u LD_PRELOAD nix develop --quiet -c "$@"

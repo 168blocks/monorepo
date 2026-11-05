@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "blocks168-example",
+  "version": "${version}",
+  "name": "168blocks Example",
+  "description": "Example 168blocks mod (common: server and client)",
+  "authors": ["168blocks"],
+  "license": "proprietary",
+  "environment": "*",
+  "entrypoints": {
+    "main": [{ "adapter": "kotlin", "value": "net.blocks168.mod.example.ExampleMod" }],
+    "client": [{ "adapter": "kotlin", "value": "net.blocks168.mod.example.client.ExampleModClient" }]
+  },
+  "mixins": ["blocks168-example.mixins.json"],
+  "depends": {
+    "fabricloader": ">=${fabricLoader}",
+    "fabric-api": "*",
+    "fabric-language-kotlin": ">=${fabricKotlin}",
+    "minecraft": "~${minecraft}",
+    "java": ">=${java}"
+  }
+}
