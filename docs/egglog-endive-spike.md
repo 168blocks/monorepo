@@ -1,6 +1,6 @@
 > Findings of the standalone egglog-on-Endive spike (2026-11-05), kept as written. The spike was a Maven
-> project; its code now lives in `libs/pgecs-optimizer` (`FlatMemory`, `Egglog`, the `egglog-wasi` crate, and
-> the workload as `src/test/resources/join-reorder.egg`). Current numbers and usage: `libs/pgecs-optimizer/README.md`.
+> project; its code now lives in `libs/pgecs-eqsat` (`FlatMemory`, `Egglog`, the `egglog-wasi` crate, and
+> the workload as `src/test/resources/join-reorder.egg`). Current numbers and usage: `libs/pgecs-eqsat/README.md`.
 
 # egglog in Endive via wasip1: findings
 

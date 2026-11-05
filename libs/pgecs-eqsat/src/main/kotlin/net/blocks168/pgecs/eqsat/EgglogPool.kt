@@ -1,4 +1,4 @@
-package net.blocks168.pgecs.optimizer
+package net.blocks168.pgecs.eqsat
 
 import java.util.concurrent.ArrayBlockingQueue
 

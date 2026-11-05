@@ -1,4 +1,4 @@
-package net.blocks168.pgecs.optimizer
+package net.blocks168.pgecs.eqsat
 
 import run.endive.runtime.ConstantEvaluators
 import run.endive.runtime.Instance

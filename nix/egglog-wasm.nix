@@ -1,4 +1,4 @@
-# egglog compiled to wasm32-wasip1 (libs/pgecs-optimizer/egglog-wasi), for the pgecs optimizer.
+# egglog compiled to wasm32-wasip1 (libs/pgecs-eqsat/egglog-wasi), for the pgecs optimizer.
 # Output: $out/egglog.wasm, a reactor-style module that Endive compiles to JVM classes at build time.
 {
   lib,
@@ -20,11 +20,11 @@ let
   };
 
   crate = lib.fileset.toSource {
-    root = ../libs/pgecs-optimizer/egglog-wasi;
+    root = ../libs/pgecs-eqsat/egglog-wasi;
     fileset = lib.fileset.unions [
-      ../libs/pgecs-optimizer/egglog-wasi/Cargo.toml
-      ../libs/pgecs-optimizer/egglog-wasi/Cargo.lock
-      ../libs/pgecs-optimizer/egglog-wasi/src
+      ../libs/pgecs-eqsat/egglog-wasi/Cargo.toml
+      ../libs/pgecs-eqsat/egglog-wasi/Cargo.lock
+      ../libs/pgecs-eqsat/egglog-wasi/src
     ];
   };
 
@@ -41,7 +41,7 @@ stdenv.mkDerivation {
   inherit src;
   sourceRoot = "egglog-wasi-src/egglog-wasi";
 
-  cargoDeps = rustPlatform.importCargoLock { lockFile = ../libs/pgecs-optimizer/egglog-wasi/Cargo.lock; };
+  cargoDeps = rustPlatform.importCargoLock { lockFile = ../libs/pgecs-eqsat/egglog-wasi/Cargo.lock; };
   nativeBuildInputs = [
     rustPlatform.cargoSetupHook
     toolchain

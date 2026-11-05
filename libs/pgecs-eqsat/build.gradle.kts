@@ -3,7 +3,7 @@ plugins {
     `java-library`
 }
 
-description = "pgecs optimizer: equality saturation with egglog (wasm32-wasip1) on the JVM through Endive"
+description = "pgecs-eqsat: equality saturation with egglog (wasm32-wasip1) on the JVM through Endive"
 
 // Endive's build-time (AOT) compiler turns egglog.wasm into JVM classes when this module is built.
 val endiveCompiler = configurations.create("endiveCompiler")
@@ -17,7 +17,7 @@ dependencies {
 // egglog.wasm is built by Nix (nix/egglog-wasm.nix); the dev shell points BLOCKS_EGGLOG_WASM at it.
 val egglogWasm: Provider<String> = providers.environmentVariable("BLOCKS_EGGLOG_WASM").orElse("")
 
-val aotName = "net.blocks168.pgecs.optimizer.aot.EgglogModule"
+val aotName = "net.blocks168.pgecs.eqsat.aot.EgglogModule"
 val aotDir = layout.buildDirectory.dir("generated/endive")
 val aotClasses = aotDir.map { it.dir("classes") }
 val aotSources = aotDir.map { it.dir("sources") }
@@ -79,11 +79,11 @@ tasks.withType<Test>().configureEach {
     maxHeapSize = "1g"
 }
 
-// Timing of the join-reordering workload, not part of the build: ./dev ./gradlew :libs:pgecs-optimizer:benchmark
+// Timing of the join-reordering workload, not part of the build: ./dev ./gradlew :libs:pgecs-eqsat:benchmark
 tasks.register<JavaExec>("benchmark") {
     description = "Times egglog on the join-reordering workload (warm-up curve and steady state)"
     classpath = sourceSets.test.get().runtimeClasspath
-    mainClass.set("net.blocks168.pgecs.optimizer.BenchmarkKt")
+    mainClass.set("net.blocks168.pgecs.eqsat.BenchmarkKt")
     jvmArgs("-XX:-DontCompileHugeMethods")
     maxHeapSize = "1g"
     args(providers.gradleProperty("runs").orElse("1200").get())

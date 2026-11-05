@@ -1,7 +1,7 @@
-package net.blocks168.pgecs.optimizer
+package net.blocks168.pgecs.eqsat
 
 /**
- * Times the join-reordering workload: `./dev ./gradlew :libs:pgecs-optimizer:benchmark [-Pruns=1200]`.
+ * Times the join-reordering workload: `./dev ./gradlew :libs:pgecs-eqsat:benchmark [-Pruns=1200]`.
  * Reports the warm-up curve and the steady state (median of the second half), on a fresh e-graph per
  * query and with the rules kept in a session (push/pop per query).
  */

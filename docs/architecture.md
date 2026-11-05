@@ -30,7 +30,7 @@ pgecs). Java 25 is the minimum: Minecraft 26.3 and Velocity 4.3 require it.
 * **PostgreSQL**: everything persistent, through **pgecs** (`libs/pgecs`), a fully ACID persistent
   entity component system (prototype: connection only). Design: [`pgecs.md`](pgecs.md). Its query
   planner will optimise with equality saturation: egglog compiled to Wasm and run on the JVM by Endive
-  (`libs/pgecs-optimizer`).
+  (`libs/pgecs-eqsat`).
 * **S3-compatible object store**: backups and replays (SeaweedFS locally).
 
 ## Local network

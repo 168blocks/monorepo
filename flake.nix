@@ -36,7 +36,7 @@
         in
         pg.withPackages (_: [ pg_jsonschema ]);
 
-      # egglog as wasm32-wasip1 for libs/pgecs-optimizer (Endive compiles it to JVM classes)
+      # egglog as wasm32-wasip1 for libs/pgecs-eqsat (Endive compiles it to JVM classes)
       egglogWasmFor = pkgs: (pkgs.extend rust-overlay.overlays.default).callPackage ./nix/egglog-wasm.nix { };
     in
     {

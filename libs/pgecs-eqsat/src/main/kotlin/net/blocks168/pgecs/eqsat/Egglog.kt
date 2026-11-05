@@ -1,6 +1,6 @@
-package net.blocks168.pgecs.optimizer
+package net.blocks168.pgecs.eqsat
 
-import net.blocks168.pgecs.optimizer.aot.EgglogModule
+import net.blocks168.pgecs.eqsat.aot.EgglogModule
 import run.endive.runtime.ExportFunction
 import run.endive.runtime.ImportValues
 import run.endive.runtime.Instance

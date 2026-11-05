@@ -1,4 +1,4 @@
-# pgecs-optimizer
+# pgecs-eqsat
 
 Equality saturation for the pgecs query planner: [egglog](https://github.com/egraphs-good/egglog)
 (Rust, MIT) compiled **unmodified** to `wasm32-wasip1` and run inside the JVM by
@@ -39,7 +39,7 @@ To move to another egglog commit: change `rev` and `hash` in `nix/egglog-wasm.ni
 
 ## Performance
 
-`./dev ./gradlew :libs:pgecs-optimizer:benchmark [-Pruns=3000]` times the join-reordering workload
+`./dev ./gradlew :libs:pgecs-eqsat:benchmark [-Pruns=3000]` times the join-reordering workload
 (`src/test/resources/join-reorder.egg`: 4-way join, 2 filters, projection, join commutativity and
 associativity, filter splitting and pushdown, `saturate`, `extract`). On the main dev machine
 (2026-11-05, Java 25.0.5):
