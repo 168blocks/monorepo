@@ -271,11 +271,19 @@ internal class Lowering(private val q: QueryBuilder) {
         is LExpr.Neg -> LV.E(Expr.Negate(asExpr(lower(e.operand, ctx), ctx)))
         is LExpr.Convert -> lower(e.operand, ctx)
         is LExpr.Cond -> conditional(e, ctx)
-        is LExpr.Concat -> fail(ctx, "string concatenation is not translatable")
+        is LExpr.Concat -> {
+            val parts = e.parts.map { p ->
+                val x = asExpr(lower(p, ctx), ctx)
+                if (x.type.kind != ValueType.Kind.TEXT) fail(ctx, "string templates of ${x.type} values are not translatable")
+                if (x.type.nullable) fail(ctx, "string template of a value that may be null (Kotlin would print \"null\")")
+                x
+            }
+            LV.E(parts.reduce { a, b -> Functions.call(Functions.CONCAT, a, b) })
+        }
         is LExpr.GetField -> fail(ctx, "field ${e.name} is read directly; only getters are translatable")
     }
 
-    /** `x ?: d` arrives as `if (x == null) d else x`; anything else is not translatable. */
+    /** `x ?: d` arrives as `if (x == null) d else x` and becomes `Coalesce`; other ifs become `If`. */
     private fun conditional(e: LExpr.Cond, ctx: Ctx): LV {
         val c = asBool(lower(e.condition, ctx), ctx)
         val t = asExpr(lower(e.then, ctx), ctx)
@@ -283,7 +291,11 @@ internal class Lowering(private val q: QueryBuilder) {
         return when {
             c is Expr.IsNull -> LV.E(Expr.Coalesce(listOf(f, t)))
             c is Expr.Not && c.operand is Expr.IsNull -> LV.E(Expr.Coalesce(listOf(t, f)))
-            else -> fail(ctx, "if/else is only translatable as ?: (a null check)")
+            else -> try {
+                LV.E(Expr.If(c, t, f))
+            } catch (x: IllegalArgumentException) {
+                fail(ctx, x.message ?: "invalid if")
+            }
         }
     }
 

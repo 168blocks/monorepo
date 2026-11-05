@@ -245,6 +245,23 @@ class QueryDslTest {
     }
 
     @Test
+    fun `if, elvis and string templates`() {
+        val q = query(null) {
+            val p by entity
+            select { if (p[ProfileComponent].level > 3) "<${p[ProfileComponent].displayName}>" else "low" }
+        }
+        assertEquals(
+            "(if (${'$'}p_profile.level <= 3) then \"low\" else pgecs:concat(pgecs:concat(\"<\", ${'$'}p_profile.display_name), \">\"))",
+            q.ir.select.single().expr.toString(),
+        )
+        val q2 = query(null) {
+            val m by entity
+            select { m[EmailComponent].verifiedAt ?: Instant.EPOCH }
+        }
+        assertTrue(q2.ir.select.single().expr is Expr.Coalesce)
+    }
+
+    @Test
     fun `errors name the problem`() {
         val e1 = assertFailsWith<QueryBuildException> {
             query(null) {
