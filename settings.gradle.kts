@@ -14,6 +14,7 @@ rootProject.name = "168blocks"
 include(":libs:pgecs") // ACID persistent ECS on PostgreSQL (backend, mods, Velocity plugins)
 include(":libs:pgecs-ir") // first-level query IR of pgecs (DSL in, planner and SQL compiler out)
 include(":libs:pgecs-eqsat") // equality saturation (egglog on Endive) for the pgecs query planner
+include(":libs:pgecs-query") // pgecs query engine: planner, eqsat optimisation, SQL compiler, plan cache
 include(":libs:common") // JVM code shared by all server-side components (CBOR wire format, ...)
 include(":libs:api") // Kotlin Multiplatform backend API model, shared with the frontend
 

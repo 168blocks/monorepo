@@ -1,0 +1,88 @@
+; Core rewrite rules of the pgecs planner (libs/pgecs-query, opt/EqsatOptimizer.kt).
+;
+; Only predicates are encoded. Scalar expressions are opaque ids that the planner interns, so two
+; equal expressions always have the same id. Entities in has-probes are (E id) or (AnyE) for "any
+; target". Every rule here must be valid under SQL's three-valued logic: the planner already turned
+; Kotlin's two-valued semantics into SQL before encoding.
+
+(datatype Ent (E i64) (AnyE))
+(datatype Rels (RNil) (RCons String Rels))
+(datatype Pred
+  (T :cost 0)
+  (F :cost 0)
+  ; a row (entity = x, rel in rs, target = y) exists, probed from block b; never null
+  (Has i64 Ent Rels Ent :cost 10)
+  ; exists (select 1 from <block b> where p); never null
+  (Sub i64 Pred :cost 30)
+  (Cmp String i64 i64 :cost 2)
+  (IsNull i64 :cost 2)
+  ; any other predicate, kept as it is
+  (Atom i64 :cost 2)
+  (And Pred Pred :cost 1)
+  (Or Pred Pred :cost 1)
+  (Not Pred :cost 1))
+
+; (matched b x r y): a mandatory scan of block b guarantees the row (x, r, y)
+(relation matched (i64 Ent String Ent))
+; (anc b a): a is b or a block enclosing b
+(relation anc (i64 i64))
+; two-valued predicates (never null), for which p and not p contradict
+(relation two (Pred))
+
+(ruleset core)
+
+(rule ((= p (Has b x r y))) ((two p)) :ruleset core)
+(rule ((= p (Sub b q))) ((two p)) :ruleset core)
+(rule ((= p (IsNull i))) ((two p)) :ruleset core)
+(rule ((= p (T))) ((two p)) :ruleset core)
+(rule ((= p (F))) ((two p)) :ruleset core)
+(rule ((= p (Not q)) (two q)) ((two p)) :ruleset core)
+(rule ((= p (And q r)) (two q) (two r)) ((two p)) :ruleset core)
+(rule ((= p (Or q r)) (two q) (two r)) ((two p)) :ruleset core)
+
+; constants
+(rewrite (And (T) p) p :ruleset core)
+(rewrite (And (F) p) (F) :ruleset core)
+(rewrite (Or (T) p) (T) :ruleset core)
+(rewrite (Or (F) p) p :ruleset core)
+(rewrite (Not (T)) (F) :ruleset core)
+(rewrite (Not (F)) (T) :ruleset core)
+(rewrite (Sub b (F)) (F) :ruleset core)
+
+; and / or are commutative, associative and idempotent
+(rewrite (And p q) (And q p) :ruleset core)
+(rewrite (Or p q) (Or q p) :ruleset core)
+(rewrite (And p (And q r)) (And (And p q) r) :ruleset core)
+(rewrite (Or p (Or q r)) (Or (Or p q) r) :ruleset core)
+(rewrite (And p p) p :ruleset core)
+(rewrite (Or p p) p :ruleset core)
+
+; negation (De Morgan and double negation hold in three-valued logic)
+(rewrite (Not (Not p)) p :ruleset core)
+(rewrite (Not (And p q)) (Or (Not p) (Not q)) :ruleset core)
+(rewrite (Not (Or p q)) (And (Not p) (Not q)) :ruleset core)
+(rewrite (Not (Cmp "=" a b)) (Cmp "<>" a b) :ruleset core)
+(rewrite (Not (Cmp "<>" a b)) (Cmp "=" a b) :ruleset core)
+(rewrite (Not (Cmp "<" a b)) (Cmp ">=" a b) :ruleset core)
+(rewrite (Not (Cmp "<=" a b)) (Cmp ">" a b) :ruleset core)
+(rewrite (Not (Cmp ">" a b)) (Cmp "<=" a b) :ruleset core)
+(rewrite (Not (Cmp ">=" a b)) (Cmp "<" a b) :ruleset core)
+(rewrite (Not (Cmp "is not distinct from" a b)) (Cmp "is distinct from" a b) :ruleset core)
+(rewrite (Not (Cmp "is distinct from" a b)) (Cmp "is not distinct from" a b) :ruleset core)
+
+; contradictions and tautologies, only where p is never null
+(rule ((= a (And p (Not p))) (two p)) ((union a (F))) :ruleset core)
+(rule ((= a (Or p (Not p))) (two p)) ((union a (T))) :ruleset core)
+
+; a probe that a mandatory scan of this or an enclosing block guarantees is true
+(rule ((= h (Has b x (RCons r (RNil)) y)) (anc b a) (matched a x r y)) ((union h (T))) :ruleset core)
+(rule ((= h (Has b x (RCons r (RNil)) (AnyE))) (anc b a) (matched a x r y)) ((union h (T))) :ruleset core)
+(rule ((= h (Has b x (RCons r rs) y)) (= (T) (Has b x rs y))) ((union h (T))) :ruleset core)
+
+; probes of one subject and target merge into one probe over several components:
+; has(x, A) or has(x, B) == has(x, A|B); not has(x, A) and not has(x, B) == not has(x, A|B)
+(rewrite (Or (Has b x (RCons r (RNil)) y) (Has b x rs y)) (Has b x (RCons r rs) y) :ruleset core)
+(rewrite (And (Not (Has b x (RCons r (RNil)) y)) (Not (Has b x rs y))) (Not (Has b x (RCons r rs) y)) :ruleset core)
+
+; a probe with a target implies the same probe with any target
+(rule ((= a (And (Has b x rs y) (Has b x rs (AnyE))))) ((union a (Has b x rs y))) :ruleset core)
