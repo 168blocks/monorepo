@@ -19,7 +19,8 @@ import java.util.concurrent.Executors
  *
  * Hosted servers share everything static with the host (bootstrap, built-in registries, mod state); the
  * fixes for static state that breaks that (C2ME's `System.exit` on stop, worker pools shut down on stop,
- * the watchdog, delayed crashes, Async) are in the `cohost-fixes` mod (#75), which a host should load.
+ * the watchdog, delayed crashes, Async) are in the `cohost-fixes` mod, which this mod depends on
+ * (docs/co-hosting.md).
  */
 object CreativeHost {
     private val log = LoggerFactory.getLogger(CreativeHostMod.MOD_ID)
