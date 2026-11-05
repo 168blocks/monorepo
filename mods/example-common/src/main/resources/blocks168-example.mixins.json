@@ -1,6 +1,6 @@
 {
   "required": true,
-  "package": "net.blocks168.mod.example.mixin",
+  "package": "dev.vxcc.b8.mod.example.mixin",
   "compatibilityLevel": "JAVA_25",
   "mixins": ["MinecraftServerMixin"],
   "injectors": { "defaultRequire": 1 }

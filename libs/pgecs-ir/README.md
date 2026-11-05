@@ -2,7 +2,7 @@
 
 The first-level query IR of pgecs (`docs/pgecs.md`, *Pipeline* step 2): what the Kotlin and Java DSLs
 and the lambda decompiler lower to, and what the planner, the egglog optimizer and the SQL compiler
-consume. Package `net.blocks168.pgecs.ir`, no dependencies beyond the Kotlin standard library.
+consume. Package `dev.vxcc.alexs168.pgecs.ir`, no dependencies beyond the Kotlin standard library.
 
 ```
 DSL calls + decompiled lambdas ──► QueryIr ──parameterize()──► BoundQuery(shape, arguments)

@@ -8,7 +8,7 @@
   "license": "proprietary",
   "environment": "client",
   "entrypoints": {
-    "client": [{ "adapter": "kotlin", "value": "net.blocks168.mod.e2e.client.E2eClient" }]
+    "client": [{ "adapter": "kotlin", "value": "dev.vxcc.b8.mod.e2e.client.E2eClient" }]
   },
   "mixins": ["blocks168-e2e-client.mixins.json"],
   "depends": {

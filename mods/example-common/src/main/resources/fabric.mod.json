@@ -8,8 +8,8 @@
   "license": "proprietary",
   "environment": "*",
   "entrypoints": {
-    "main": [{ "adapter": "kotlin", "value": "net.blocks168.mod.example.ExampleMod" }],
-    "client": [{ "adapter": "kotlin", "value": "net.blocks168.mod.example.client.ExampleModClient" }]
+    "main": [{ "adapter": "kotlin", "value": "dev.vxcc.b8.mod.example.ExampleMod" }],
+    "client": [{ "adapter": "kotlin", "value": "dev.vxcc.b8.mod.example.client.ExampleModClient" }]
   },
   "mixins": ["blocks168-example.mixins.json"],
   "depends": {
