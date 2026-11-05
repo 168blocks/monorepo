@@ -160,26 +160,34 @@ private class Rendering(private val stats: Stats, private val q: LogicalQuery, p
         val (from, where) = block(q.root, emptySet())
         val whereSql = if (where.isEmpty()) "" else "\nwhere " + where.joinToString("\n  and ") { pred(it) }
 
-        val items = q.select.map { expr(it.expr) to it.name }
         fun ordinalOf(e: Expr): Int? = q.select.indexOfFirst { it.expr == e }.takeIf { it >= 0 }?.plus(1)
+        // a text sort key that is selected is ordered by position, so the column carries the collation
+        // (`order by 1 collate "C"` would be the integer 1)
+        val collated = q.orderBy.filter { it.expr.kind == Kind.STRING && it.expr !is Expr.Param && it.expr !is Expr.Const }.mapNotNull { ordinalOf(it.expr) }.toSet()
+        val items = q.select.mapIndexed { i, p ->
+            (if (i + 1 in collated) "(${expr(p.expr)}) collate \"C\"" else expr(p.expr)) to p.name
+        }
 
         val tail = StringBuilder()
         if (q.groupBy.isNotEmpty()) {
             tail.append("\ngroup by ").append(q.groupBy.joinToString(", ") { e -> ordinalOf(e)?.toString() ?: expr(e) })
         }
         if (q.having != Pred.True) tail.append("\nhaving ").append(pred(q.having))
-        val orderBy = if (q.orderBy.isEmpty()) {
+        // a constant sort key orders nothing (and, as a parameter of its own, is not the selected
+        // constant, which `select distinct` would require)
+        val sortKeys = q.orderBy.filter { it.expr !is Expr.Param && it.expr !is Expr.Const && it.expr != Expr.Now }
+        val orderBy = if (sortKeys.isEmpty()) {
             ""
         } else {
-            "\norder by " + q.orderBy.joinToString(", ") { k ->
-                val e = ordinalOf(k.expr)?.toString() ?: expr(k.expr)
-                val collate = if (k.expr.kind == Kind.STRING) " collate \"C\"" else ""
+            "\norder by " + sortKeys.joinToString(", ") { k ->
+                val ordinal = ordinalOf(k.expr)
+                val e = ordinal?.toString() ?: expr(k.expr).let { if (k.expr.kind == Kind.STRING) "($it) collate \"C\"" else it }
                 val nulls = when (k.nullsFirst) {
                     null -> ""
                     true -> " nulls first"
                     false -> " nulls last"
                 }
-                e + collate + (if (k.descending) " desc" else "") + nulls
+                e + (if (k.descending) " desc" else "") + nulls
             }
         }
         val cap = when (mode) {
@@ -202,7 +210,8 @@ private class Rendering(private val stats: Stats, private val q: LogicalQuery, p
             Mode.COUNT -> if (!q.distinct && !q.isAggregate && q.limit == null && q.offset == null) {
                 "select count(*)\nfrom $from$whereSql"
             } else {
-                val inner = if (q.distinct || q.isAggregate) list else "1"
+                // order by refers to the select list by position
+                val inner = if (q.distinct || q.isAggregate || q.orderBy.isNotEmpty()) list else "1"
                 "select count(*) from (\nselect $distinct$inner\nfrom $from$whereSql$tail$orderBy$limit$offset\n) q"
             }
             else -> "select $distinct$list\nfrom $from$whereSql$tail$orderBy$limit$offset$lock"
@@ -344,8 +353,9 @@ private class Rendering(private val stats: Stats, private val q: LogicalQuery, p
                 val l = expr(p.left)
                 val r = expr(p.right)
                 if (ordering && (p.left.kind == Kind.STRING || p.right.kind == Kind.STRING)) {
-                    // Kotlin compares strings by UTF-16 code units, close to the "C" collation
-                    "($l collate \"C\") ${p.op.sql} $r"
+                    // Kotlin compares strings by UTF-16 code units, close to the "C" collation; on both
+                    // sides, which may carry another explicit collation (lower/upper)
+                    "($l collate \"C\") ${p.op.sql} ($r collate \"C\")"
                 } else {
                     "$l ${p.op.sql} $r"
                 }
@@ -408,49 +418,103 @@ private class Rendering(private val stats: Stats, private val q: LogicalQuery, p
     private fun call(e: Expr.Call): String {
         val a = e.args.map { expr(it) }
         return when (e.fn) {
-            Fn.LOWER -> "lower(${a[0]})"
-            Fn.UPPER -> "upper(${a[0]})"
-            Fn.TRIM -> "btrim(${a[0]})"
-            Fn.LENGTH -> "length(${a[0]})::bigint"
+            // Kotlin maps case by Unicode (Locale.ROOT), whatever the database's locale: the builtin
+            // provider's full case mapping does the same (`ß` upper-cases to `SS`, final sigma)
+            Fn.LOWER -> "lower((${a[0]}) collate pg_unicode_fast)"
+            Fn.UPPER -> "upper((${a[0]}) collate pg_unicode_fast)"
+            Fn.TRIM -> "btrim(${a[0]}, $TRIMMED)"
+            // UTF-16 code units, as String.length: characters outside the BMP count twice
+            Fn.LENGTH -> "(length(${a[0]}) + length(regexp_replace(${a[0]}, '[^\\U00010000-\\U0010FFFF]', '', 'g')))::bigint"
             Fn.STARTS_WITH -> "starts_with(${a[0]}, ${a[1]})"
             Fn.ENDS_WITH -> "(right(${a[0]}, length(${a[1]})) = ${a[1]})"
             Fn.CONTAINS -> "(strpos(${a[0]}, ${a[1]}) > 0)"
             Fn.ABS -> "abs(${a[0]})"
             Fn.COALESCE -> "coalesce(${a.joinToString(", ")})"
-            Fn.CONCAT -> "(${a.joinToString(" || ")})"
+            // `||` and `~` bind like `->>`: `a || x->>'k'` would be `(a || x)->>'k'`
+            Fn.CONCAT -> a.joinToString(" || ", "(", ")") { "($it)" }
+            Fn.REGEX -> "((${a[0]}) ~ (${a[1]}))"
+            Fn.JSON_CONTAINS -> "(${a[0]} @> jsonb_build_array(" + (e.args[1].kind?.let { "(${a[1]})::${it.sqlType}" } ?: a[1]) + "))"
+            Fn.JSON_SIZE -> "(case when jsonb_typeof(${a[0]}) = 'array' then jsonb_array_length(${a[0]})::bigint end)"
+            Fn.JSON_GET -> {
+                val k = e.kind ?: Kind.JSON
+                val index = "(${a[1]})::int"
+                val read = when (k) {
+                    Kind.JSON -> "${a[0]} -> $index"
+                    Kind.STRING -> "${a[0]} ->> $index"
+                    else -> "(${a[0]} ->> $index)::${k.sqlType}"
+                }
+                "(case when ${a[1]} >= 0 then $read end)"
+            }
         }
     }
 
     private fun aggregate(e: Expr.Aggregate): String {
-        val arg = e.arg?.let { expr(it) + if (it.kind == Kind.STRING && (e.fn == AggFn.MIN || e.fn == AggFn.MAX)) " collate \"C\"" else "" }
+        val arg = e.arg?.let { expr(it).let { a -> if (it.kind == Kind.STRING && (e.fn == AggFn.MIN || e.fn == AggFn.MAX)) "($a) collate \"C\"" else a } }
         val d = if (e.distinct) "distinct " else ""
         return when (e.fn) {
             AggFn.COUNT -> if (arg == null) "count(*)" else "count($d$arg)"
             AggFn.SUM -> "sum($d$arg)::${e.kind.sqlType}"
             AggFn.AVG -> "avg($d$arg)::double precision"
-            AggFn.MIN -> "min($arg)"
-            AggFn.MAX -> "max($arg)"
+            // Postgres has no min/max of uuid; the text form orders the same (fixed-width lower-case hex)
+            AggFn.MIN, AggFn.MAX -> if (e.arg?.kind == Kind.ENTITY) {
+                "${e.fn.name.lowercase()}(($arg)::text collate \"C\")::uuid"
+            } else {
+                "${e.fn.name.lowercase()}($arg)"
+            }
         }
     }
 
+    /** The largest alias anywhere in [q], including `exists` blocks inside expressions (a projection `x has T`). */
     private fun maxAlias(q: LogicalQuery): Int {
         var m = -1
-        fun visit(b: Block) {
-            b.scans.forEach { m = maxOf(m, it.alias) }
-            b.optionals.forEach(::visit)
-            fun visitPred(p: Pred) {
-                when (p) {
-                    is Pred.Exists -> visit(p.block)
-                    is Pred.And -> p.items.forEach(::visitPred)
-                    is Pred.Or -> p.items.forEach(::visitPred)
-                    is Pred.Not -> visitPred(p.pred)
-                    else -> {}
-                }
+        lateinit var visitPred: (Pred) -> Unit
+        fun visitExpr(e: Expr) {
+            when (e) {
+                is Expr.Bool -> visitPred(e.pred)
+                is Expr.If -> { visitPred(e.condition); visitExpr(e.then); visitExpr(e.otherwise) }
+                is Expr.Call -> e.args.forEach(::visitExpr)
+                is Expr.Arith -> { visitExpr(e.left); visitExpr(e.right) }
+                is Expr.Aggregate -> e.arg?.let(::visitExpr)
+                is Expr.Cast -> visitExpr(e.expr)
+                else -> {}
             }
+        }
+        fun visit(b: Block) {
+            b.scans.forEach { s ->
+                m = maxOf(m, s.alias)
+                s.subject?.let(::visitExpr)
+                s.target?.let(::visitExpr)
+            }
+            b.optionals.forEach(::visit)
             visitPred(b.where)
         }
+        visitPred = { p ->
+            when (p) {
+                is Pred.Exists -> visit(p.block)
+                is Pred.And -> p.items.forEach(visitPred)
+                is Pred.Or -> p.items.forEach(visitPred)
+                is Pred.Not -> visitPred(p.pred)
+                is Pred.Cmp -> { visitExpr(p.left); visitExpr(p.right) }
+                is Pred.IsNull -> visitExpr(p.expr)
+                is Pred.InList -> { visitExpr(p.left); visitExpr(p.right) }
+                is Pred.Test -> visitExpr(p.expr)
+                is Pred.Has -> { p.subject?.let(::visitExpr); p.target?.let(::visitExpr) }
+                Pred.True, Pred.False -> {}
+            }
+        }
         visit(q.root)
+        q.select.forEach { visitExpr(it.expr) }
+        q.groupBy.forEach(::visitExpr)
+        visitPred(q.having)
+        q.orderBy.forEach { visitExpr(it.expr) }
         return m
     }
+
 }
 
+/**
+ * The characters Kotlin's `String.trim()` removes (`Char.isWhitespace`: Java's whitespace and space
+ * characters), as a SQL string for `btrim`; SQL's default trims only spaces.
+ */
+private val TRIMMED: String = (0..0xFFFF).map { it.toChar() }.filter { it.isWhitespace() }
+    .joinToString("", "E'", "'") { "\\u%04x".format(it.code) }

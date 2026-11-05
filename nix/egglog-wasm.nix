@@ -1,5 +1,8 @@
 # egglog compiled to wasm32-wasip1 (libs/pgecs-eqsat/egglog-wasi), for the pgecs optimizer.
-# Output: $out/egglog.wasm, a reactor-style module that Endive compiles to JVM classes at build time.
+# Output: $out/egglog.wasm, a reactor-style module that Endive compiles at build time.
+#
+# optLevel: Rust's opt-level. "s" (Cargo.toml's default) for Endive's bytecode AOT, where smaller
+# functions JIT far better; 3 for Redline's native code (nix/egglog-redline.nix), which prefers inlining.
 {
   lib,
   stdenv,
@@ -7,6 +10,7 @@
   runCommand,
   rustPlatform,
   rust-bin,
+  optLevel ? "s",
 }:
 let
   # egglog pins Rust 1.91.0 (rust-toolchain.toml); rust-overlay provides the wasm32-wasip1 std for it.
@@ -37,7 +41,7 @@ let
 in
 stdenv.mkDerivation {
   pname = "egglog-wasm";
-  version = "3.0.0-6c3a0c9";
+  version = "3.0.0-6c3a0c9-opt${toString optLevel}";
   inherit src;
   sourceRoot = "egglog-wasi-src/egglog-wasi";
 
@@ -46,6 +50,8 @@ stdenv.mkDerivation {
     rustPlatform.cargoSetupHook
     toolchain
   ];
+
+  env.CARGO_PROFILE_RELEASE_OPT_LEVEL = toString optLevel;
 
   buildPhase = ''
     runHook preBuild

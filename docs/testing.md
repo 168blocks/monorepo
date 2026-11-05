@@ -8,6 +8,26 @@ Three levels, cheapest first:
 | Integration | e.g. `libs/pgecs`, `backend` | `./dev ./gradlew build` | real PostgreSQL from Nix (`TestPostgres`) |
 | End to end | `e2e/` | `tools/network.sh test` | the whole network on podman (`deploy/compose.yaml`) |
 
+## Randomized tests of the pgecs query engine
+
+`libs/pgecs-query`'s `RandomQueryTest` generates random first-level IR queries (`FuzzGen`: every kind
+of match, optional groups, predicates and expressions of every IR type, aggregates, distinct,
+order-by, paging) over random datasets (`FuzzData`, one schema each) and checks the engine, with and
+without equality saturation, against a naive reference evaluator (`Oracle`). It also checks
+properties that need no oracle: ternary logic partitioning (the rows of `q` are those of `q ∧ p`
+plus those of `q ∧ ¬p`), the same shape with other arguments (plan-cache hits), `Mode.COUNT`, and that
+the canonical text parses back. A failure is shrunk (`FuzzShrink`) to a small query before it is
+reported, with the SQL and the Gradle properties that rerun exactly that case.
+
+The build runs 1500 queries with a fixed seed (about a minute). For a longer run:
+
+```sh
+./dev ./gradlew :libs:pgecs-query:test --tests '*RandomQueryTest*' \
+  -Ppgecs.fuzz.seed=random -Ppgecs.fuzz.queries=100000 -Ppgecs.fuzz.datasets=50
+```
+
+The seed is printed at the end (and in a failure, with `-Ppgecs.fuzz.case=<dataset>:<query>`).
+
 ## End-to-end tests of the network
 
 Goal: tests that read like what a player and an operator would check, against the real network
@@ -45,6 +65,16 @@ scenario("second player sees the first in the lobby") {
   address (as `blocks` it is rejected) and reaches the Fabric servers only through the tunnel; with its
   peer removed from the hub an edge refuses logins (a bot), and lets players in again once restored.
   Nothing reaches PostgreSQL through a host port.
+* `EdgeNetworkTest` (network plugin, `velocity/network`): a bot logs in through each edge; pings of
+  every edge show the network-wide player count; the same name on edge 2 kicks the edge-1 session (and
+  twice on one edge keeps the newest); `network drain` on edge 1 transfers a bot to another edge
+  (`Bot.followTransfer`) and edge 1 refuses logins until `network undrain`. `TunnelTest` also checks
+  the "maintenance" ping of an edge without its tunnel.
+* `DnsTest`: the player DNS ([`dns.md`](dns.md)) through `Dns`, a small DNS client (UDP, TCP, EDNS
+  client subnet) at `BLOCKS_E2E_DNS`: SOA/NS/NXDOMAIN of the zone, each region's healthy edges (SRV
+  ports tell the edges apart, they share 127.0.0.1), `play` by client subnet with fallback and the ECS
+  scope echoed, and test edges inserted into `dns.edges` (through `ComposeNetwork`) dropping out when
+  their probe fails or they are disabled.
 * Server-side agents (see "Server-side assertions" below): `ServerAgent` / `ProxyAgent` in
   `e2e/.../agent/`; `AgentTest` checks that Velocity reports its servers and that both Fabric servers
   report their worlds and run commands (`list`). The Fabric server tests are skipped unless
@@ -139,6 +169,7 @@ command: never deploy them to production.
 | Velocity | `GET /servers` | `[{name, address, players}]` |
 | Velocity | `GET /players` | `[{uuid, name, server}]` (`server` null while not on a backend) |
 | Velocity | `POST /send {"player": "alice", "server": "survival"}` | `{status, success, reason}` |
+| Velocity | `POST /command {"command": "network drain"}` | `{success}` (as the proxy console) |
 
 Errors are `{"error": "..."}` with 400 (bad request), 404 (unknown player/server/path) or 500.
 `ServerAgent` adds `assertOnline`, `assertOffline`, `assertPosition`; `ProxyAgent` adds `assertOn`

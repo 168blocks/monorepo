@@ -34,6 +34,12 @@ class ProxyAgent(baseUrl: String) : AgentClient(baseUrl) {
     suspend fun send(player: String, server: String): SendResult =
         post("/send", buildJsonObject { put("player", JsonPrimitive(player)); put("server", JsonPrimitive(server)) })
 
+    @Serializable
+    data class CommandResult(val success: Boolean)
+
+    /** Runs a proxy command as the console, e.g. `network drain` */
+    suspend fun command(command: String): CommandResult = post("/command", buildJsonObject { put("command", JsonPrimitive(command)) })
+
     suspend fun assertOn(player: String, server: String, timeout: Duration = 10.seconds) =
         await(timeout, "$player on $server") { player(player)?.server == server }
 

@@ -279,10 +279,29 @@ private class Lowerer(private val ir: QueryIr, private val nullParams: Set<Int>)
         is IrExpr.IsNull -> isNull(e.operand, scope, positive)
         is IrExpr.Exists -> exists(e.terms, scope).let { if (positive) it else negate(it) }
         is IrExpr.Literal -> if ((e.value as Boolean) == positive) Pred.True else Pred.False
+        is IrExpr.Call -> if (e.fn == Functions.IN) inList(e, scope, positive) else {
+            val x = expr(e, scope)
+            if (positive) Pred.Test(x) else Pred.Not(Pred.Test(x))
+        }
         else -> {
             val x = expr(e, scope)
             if (positive) Pred.Test(x) else Pred.Not(Pred.Test(x))
         }
+    }
+
+    /**
+     * `value in list`: `value = any(list)`. Kotlin's `contains` is false for a null value (the list
+     * has no nulls), so the negation also holds for null values.
+     */
+    private fun inList(e: IrExpr.Call, scope: Scope, positive: Boolean): Pred {
+        val value = expr(e.args[0], scope)
+        val p = e.args[1] as IrExpr.Param
+        if (p.index in nullParams) error("list parameter ${p.index} is null")
+        // a UUID stored as a string in a field compares as text, as in `unify`
+        val kind = if (value.kind == Kind.STRING) Kind.STRING else Lowering.kindOf(p.type)
+        val test = Pred.InList(value, Expr.Param(p.index, kind, list = true))
+        if (positive) return test
+        return if (mayBeNull(e.args[0], scope)) Pred.or(listOf(Pred.IsNull(value), Pred.Not(test))) else Pred.Not(test)
     }
 
     private fun negate(p: Pred): Pred = when (p) {
@@ -302,7 +321,7 @@ private class Lowerer(private val ir: QueryIr, private val nullParams: Set<Int>)
         is IrExpr.Coalesce -> e.operands.all { mayBeNull(it, scope) }
         is IrExpr.Arith -> mayBeNull(e.left, scope) || mayBeNull(e.right, scope)
         is IrExpr.Negate -> mayBeNull(e.operand, scope)
-        is IrExpr.Call -> e.args.any { mayBeNull(it, scope) } || (e.type.nullable && e.args.isEmpty())
+        is IrExpr.Call -> !Functions.neverNull(e.fn) && (e.args.any { mayBeNull(it, scope) } || (e.type.nullable && e.args.isEmpty()) || e.fn == Functions.JSON_GET || e.fn == Functions.JSON_SIZE)
         is IrExpr.If -> mayBeNull(e.then, scope) || mayBeNull(e.otherwise, scope)
         is IrExpr.Aggregate -> e.type.nullable
         is IrExpr.Arg -> true
@@ -352,6 +371,17 @@ private class Lowerer(private val ir: QueryIr, private val nullParams: Set<Int>)
         else -> l to r
     }
 
+    /**
+     * Operands that become one SQL value (`coalesce`, `case`): UUIDs from fields are text, entities
+     * are `uuid`, and SQL does not mix them, so mixed operands are all compared as text.
+     */
+    private fun unifyAll(xs: List<Expr>): List<Expr> =
+        if (xs.any { it.kind == Kind.STRING } && xs.any { it.kind == Kind.ENTITY }) {
+            xs.map { if (it.kind == Kind.ENTITY) Expr.Cast(it, Kind.STRING) else it }
+        } else {
+            xs
+        }
+
     private fun exists(terms: List<Term>, scope: Scope): Pred {
         val child = Scope(scope)
         val b = block(terms, child, nextBlock++)
@@ -373,7 +403,7 @@ private class Lowerer(private val ir: QueryIr, private val nullParams: Set<Int>)
         is IrExpr.Literal -> Expr.Const(literal(e.value), Lowering.kindOf(e.type))
         is IrExpr.Compare, is IrExpr.And, is IrExpr.Or, is IrExpr.Not, is IrExpr.IsNull, is IrExpr.Exists ->
             Expr.Bool(pred(e, scope, positive = true))
-        is IrExpr.Coalesce -> e.operands.map { expr(it, scope) }.let { args ->
+        is IrExpr.Coalesce -> unifyAll(e.operands.map { expr(it, scope) }).let { args ->
             Expr.Call(Fn.COALESCE, args, args.last().kind)
         }
         is IrExpr.Arith -> Expr.Arith(
@@ -392,9 +422,12 @@ private class Lowerer(private val ir: QueryIr, private val nullParams: Set<Int>)
             val k = Lowering.kindOf(e.type)
             Expr.Arith(ArithOp.SUB, Expr.Const(if (k == Kind.DOUBLE) 0.0 else 0L, k), expr(e.operand, scope), k)
         }
-        is IrExpr.Call -> call(e, scope)
-        is IrExpr.If -> Expr.If(pred(e.condition, scope, positive = true), expr(e.then, scope), expr(e.otherwise, scope), Lowering.kindOf(e.type))
-        is IrExpr.Aggregate -> Expr.Aggregate(
+        is IrExpr.Call -> if (e.fn == Functions.IN) Expr.Bool(pred(e, scope, positive = true)) else call(e, scope)
+        is IrExpr.If -> {
+            val (t, o) = unifyAll(listOf(expr(e.then, scope), expr(e.otherwise, scope)))
+            Expr.If(pred(e.condition, scope, positive = true), t, o, t.kind)
+        }
+        is IrExpr.Aggregate -> e.arg?.let { expr(it, scope) }.let { arg -> Expr.Aggregate(
             when (e.fn) {
                 AggregateFn.COUNT -> AggFn.COUNT
                 AggregateFn.SUM -> AggFn.SUM
@@ -402,10 +435,11 @@ private class Lowerer(private val ir: QueryIr, private val nullParams: Set<Int>)
                 AggregateFn.MAX -> AggFn.MAX
                 AggregateFn.AVG -> AggFn.AVG
             },
-            e.arg?.let { expr(it, scope) },
+            arg,
             e.distinct,
-            Lowering.kindOf(e.type).let { if (e.arg is IrExpr.Field && e.arg!!.type.kind == ValueType.Kind.UUID) Kind.STRING else it },
-        )
+            // min/max of a UUID read from a field (text) is text
+            Lowering.kindOf(e.type).let { if (it == Kind.ENTITY && arg?.kind == Kind.STRING) Kind.STRING else it },
+        ) }
         is IrExpr.Arg -> error("lambda argument ${e.index} was never substituted")
     }
 
@@ -421,6 +455,10 @@ private class Lowerer(private val ir: QueryIr, private val nullParams: Set<Int>)
             Functions.CONTAINS -> Fn.CONTAINS
             Functions.CONCAT -> Fn.CONCAT
             Functions.NOW -> return Expr.Now
+            Functions.REGEX -> Fn.REGEX
+            Functions.JSON_CONTAINS -> Fn.JSON_CONTAINS
+            Functions.JSON_SIZE -> Fn.JSON_SIZE
+            Functions.JSON_GET -> return Expr.Call(Fn.JSON_GET, args, Lowering.fieldKind(e.type))
             else -> throw UnsupportedQueryException("function ${e.fn} cannot run in Postgres")
         }
         return Expr.Call(fn, args, fn.kind)

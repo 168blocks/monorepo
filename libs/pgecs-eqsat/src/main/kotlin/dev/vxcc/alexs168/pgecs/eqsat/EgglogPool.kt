@@ -16,7 +16,13 @@ import java.util.concurrent.ArrayBlockingQueue
  *
  * Thread-safe.
  */
-class EgglogPool(val size: Int, val prelude: String, val rebuildEvery: Int = 200) {
+class EgglogPool(
+    val size: Int,
+    val prelude: String,
+    val rebuildEvery: Int = 200,
+    /** The backend of the pool's instances (by default native where available, see [Egglog.defaultBackend]). */
+    val backend: EgglogBackend = Egglog.defaultBackend,
+) {
     init {
         require(size > 0) { "size must be positive" }
         require(rebuildEvery > 0) { "rebuildEvery must be positive" }
@@ -33,7 +39,7 @@ class EgglogPool(val size: Int, val prelude: String, val rebuildEvery: Int = 200
         private var uses = 0
 
         fun get(): Egglog {
-            val current = egglog ?: return Egglog.create().also {
+            val current = egglog ?: return Egglog.create(backend).also {
                 it.runInSession(prelude)
                 egglog = it
             }

@@ -3,7 +3,8 @@ package dev.vxcc.alexs168.pgecs.eqsat
 /**
  * Times the join-reordering workload: `./dev ./gradlew :libs:pgecs-eqsat:benchmark [-Pruns=1200]`.
  * Reports the warm-up curve and the steady state (median of the second half), on a fresh e-graph per
- * query and with the rules kept in a session (push/pop per query).
+ * query and with the rules kept in a session (push/pop per query). The backend is the default one
+ * (native where available); `-Pbackend=bytecode` or `-Pbackend=native` forces one.
  */
 fun main(args: Array<String>) {
     val runs = args.firstOrNull()?.toInt() ?: 1200
@@ -14,7 +15,7 @@ fun main(args: Array<String>) {
 
     var t = System.nanoTime()
     val egglog = Egglog.create()
-    println("java ${System.getProperty("java.version")}, instantiate ${ms(System.nanoTime() - t)} ms")
+    println("java ${System.getProperty("java.version")}, ${egglog.backend} backend, instantiate ${ms(System.nanoTime() - t)} ms")
     t = System.nanoTime()
     egglog.run(program)
     println("first query ${ms(System.nanoTime() - t)} ms")
@@ -27,7 +28,7 @@ fun main(args: Array<String>) {
     val session = LongArray(runs) { timed { egglog.runInSession(query) } }
     println("session e-graph steady state median ${ms(steady(session))} ms")
     println("wasm memory after session runs ${egglog.memoryBytes shr 20} MiB")
-    val pool = EgglogPool(1, prelude)
+    val pool = EgglogPool(1, prelude, backend = egglog.backend)
     val pooled = LongArray(runs) { timed { pool.query(body) } }
     println("pool (session rebuilt every ${pool.rebuildEvery}) steady state median ${ms(steady(pooled))} ms")
     pool.withSession { println("wasm memory of the pool's instance ${it.memoryBytes shr 20} MiB") }

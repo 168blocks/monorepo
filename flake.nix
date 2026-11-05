@@ -37,11 +37,24 @@
         pg.withPackages (_: [ pg_jsonschema ]);
 
       # egglog as wasm32-wasip1 for libs/pgecs-eqsat (Endive compiles it to JVM classes)
-      egglogWasmFor = pkgs: (pkgs.extend rust-overlay.overlays.default).callPackage ./nix/egglog-wasm.nix { };
+      egglogWasmFor =
+        pkgs: optLevel:
+        (pkgs.extend rust-overlay.overlays.default).callPackage ./nix/egglog-wasm.nix { inherit optLevel; };
 
-      # vodozemac's JNI library for Trixnity (backend Matrix bot, end-to-end encryption), built against
-      # the same glibc as Nix's JDK instead of Trixnity's prebuilt one
+      # egglog as native code (Endive's Redline, Cranelift) from the opt-level 3 build; slow, see the file
+      egglogRedlineFor =
+        pkgs:
+        pkgs.callPackage ./nix/egglog-redline.nix {
+          jdk = jdkFor pkgs;
+          egglogWasm = egglogWasmFor pkgs 3;
+        };
+
+      # vodozemac's JNI library for Trixnity, built against the same glibc as Nix's JDK. The backend uses
+      # the wasm build below instead; this one stays for speed comparisons (docs/matrix-bot.md)
       vodozemacJniFor = pkgs: pkgs.callPackage ./nix/vodozemac-jni.nix { };
+
+      # the same bindings as wasm32, run on the JVM by Endive (libs/vodozemac-endive, the backend's Matrix bot)
+      vodozemacWasmFor = pkgs: (pkgs.extend rust-overlay.overlays.default).callPackage ./nix/vodozemac-wasm.nix { };
 
       # Environment for the real game clients of the end-to-end tests (e2e/.../client, docs/testing.md):
       # `blocks-client-env <command>` runs <command> with the libraries Minecraft's LWJGL/SDL natives
@@ -89,7 +102,9 @@
         pkgs.callPackage ./nix/gradle.nix {
           jdk = jdkFor pkgs;
           postgresql = postgresFor pkgs;
-          egglogWasm = egglogWasmFor pkgs;
+          egglogWasm = egglogWasmFor pkgs "s";
+          egglogRedline = egglogRedlineFor pkgs;
+          vodozemacWasm = vodozemacWasmFor pkgs;
         };
     in
     {
@@ -133,8 +148,9 @@
               export BLOCKS_NODE=${pkgs.nodejs_24}/bin/node
               export BLOCKS_BINARYEN=${pkgs.binaryen}
               export BLOCKS_BASH=${pkgs.bashInteractive}/bin/bash
-              export BLOCKS_EGGLOG_WASM=${egglogWasmFor pkgs}/egglog.wasm
-              export BLOCKS_VODOZEMAC_JNI=${vodozemacJniFor pkgs}
+              export BLOCKS_EGGLOG_WASM=${egglogWasmFor pkgs "s"}/egglog.wasm
+              export BLOCKS_EGGLOG_REDLINE=${egglogRedlineFor pkgs}
+              export BLOCKS_VODOZEMAC_WASM=${vodozemacWasmFor pkgs}/vodozemac.wasm
               # throwaway Matrix homeserver for the backend's Matrix bot tests (TestHomeserver)
               export BLOCKS_MATRIX_TEST_HOMESERVER=${pkgs.matrix-tuwunel}/bin/tuwunel
               export BLOCKS_CLIENT_ENV=${clientEnv}/bin/blocks-client-env
@@ -164,9 +180,12 @@
 
           postgresql = postgresFor pkgs;
 
-          egglog-wasm = egglogWasmFor pkgs;
+          egglog-wasm = egglogWasmFor pkgs "s";
+          egglog-redline = egglogRedlineFor pkgs;
 
           vodozemac-jni = vodozemacJniFor pkgs;
+
+          vodozemac-wasm = vodozemacWasmFor pkgs;
 
           # PostgreSQL with pg_jsonschema for deploy/compose.yaml (the official image lacks the extension)
           postgres-image = pkgs.dockerTools.buildLayeredImage {
@@ -192,6 +211,30 @@
               Env = [ "PATH=/bin" ];
               Volumes."/var/lib/postgresql" = { };
               ExposedPorts."5432/tcp" = { };
+            };
+          };
+
+          # PowerDNS authoritative server for the player zone (deploy/compose.yaml: pdns, docs/dns.md). All
+          # answers come from the dns service through the remote backend; the config is mounted at
+          # /etc/pdns/pdns.conf (deploy/dns/pdns.conf).
+          pdns-image = pkgs.dockerTools.buildLayeredImage {
+            name = "localhost/168blocks/pdns";
+            # tag = content hash chosen by Nix (tools/network.sh reads it), so worktrees never share a tag
+            tag = null;
+            contents = [
+              pkgs.pdns
+              pkgs.dockerTools.fakeNss
+            ];
+            extraCommands = "mkdir -p tmp etc/pdns && chmod 1777 tmp";
+            config = {
+              Entrypoint = [
+                "${pkgs.pdns}/bin/pdns_server"
+                "--config-dir=/etc/pdns"
+              ];
+              ExposedPorts = {
+                "53/udp" = { };
+                "53/tcp" = { };
+              };
             };
           };
 

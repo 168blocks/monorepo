@@ -13,6 +13,7 @@
 #   8080         backend (+ web frontend)
 #   8333         S3 API (SeaweedFS)
 #   28500-28502  e2e agents (dev only): velocity (edge 1), lobby, survival (BLOCKS_E2E_AGENT_PORT in the container)
+#   10053        player DNS (PowerDNS, UDP and TCP), zone 168blocks.test (docs/dns.md)
 #
 # WireGuard, the same shape as production (design: https://claude.ai/artifact/WDswfCSv1YSxbGT7HWgtzd):
 #   core      owns the core host's network namespace and the hub's wg0 (10.168.0.1). PostgreSQL, the
@@ -73,6 +74,9 @@ services:
       - "127.0.0.1:${BLOCKS_S3_PORT:-8333}:8333"
       - "127.0.0.1:${BLOCKS_LOBBY_AGENT_PORT:-28501}:8766"
       - "127.0.0.1:${BLOCKS_SURVIVAL_AGENT_PORT:-28502}:8767"
+      # player DNS (pdns); in production DNS is the core host's second public service besides HTTPS
+      - "127.0.0.1:${BLOCKS_DNS_PORT:-10053}:53/udp"
+      - "127.0.0.1:${BLOCKS_DNS_PORT:-10053}:53/tcp"
 
   postgres:
     # PostgreSQL 18 with pg_jsonschema (required by pgecs), built by Nix (flake.nix: postgres-image)
@@ -101,6 +105,17 @@ services:
       - s3:/data
     depends_on: [core]
 
+  network-schema:
+    # the network plugin's tables (velocity/network NetworkSchema), created as the database owner; the
+    # edges (blocks_edge) cannot, and stay in maintenance until this ran
+    <<: *jvm
+    network_mode: service:core
+    restart: on-failure
+    command: ["java", "-cp", "network.jar", "dev.vxcc.b8.velocity.network.NetworkSchemaKt"]
+    environment: *core-env
+    volumes: ["./build/stage/network-schema:/srv:ro,Z"]
+    depends_on: [core, postgres]
+
   backend:
     <<: *jvm
     network_mode: service:core
@@ -113,6 +128,34 @@ services:
       BLOCKS_S3_ENDPOINT: http://localhost:8333
     volumes: ["./build/stage/backend:/srv:ro,Z"]
     depends_on: [core, postgres]
+
+  dns:
+    # player DNS answers (docs/dns.md): PowerDNS's remote backend on 127.0.0.1:8053, from the edges in
+    # dns.edges (PostgreSQL as blocks). Probes the edges with a status ping over wan (like a player would)
+    # and drops those that stop answering. Short intervals here so the tests see changes quickly.
+    <<: *jvm
+    network_mode: service:core
+    command: ["java", "-cp", "lib/*", "dev.vxcc.b8.dns.MainKt"]
+    environment:
+      <<: *core-env
+      BLOCKS_DNS_CONFIG: /srv/dns.conf
+      BLOCKS_DNS_PROBE_SECONDS: "2"
+      BLOCKS_DNS_STALE_SECONDS: "7"
+      # the edges' published ports, for their SRV records (dns.conf)
+      BLOCKS_EDGE1_PORT: "${BLOCKS_EDGE1_PORT:-25501}"
+      BLOCKS_EDGE2_PORT: "${BLOCKS_EDGE2_PORT:-25502}"
+      BLOCKS_EDGE3_PORT: "${BLOCKS_EDGE3_PORT:-25503}"
+    volumes: ["./build/stage/dns:/srv:ro,Z"]
+    depends_on: [core, postgres]
+
+  pdns:
+    # PowerDNS authoritative (Nix-built image, flake.nix: pdns-image) on port 53 of the core namespace,
+    # published above; config deploy/dns/pdns.conf
+    image: ${BLOCKS_PDNS_IMAGE:-localhost/168blocks/pdns:latest}
+    restart: unless-stopped
+    network_mode: service:core
+    volumes: ["./dns/pdns.conf:/etc/pdns/pdns.conf:ro,Z"]
+    depends_on: [core, dns]
 
   # Fabric servers: bind only 10.168.0.1 (server-ip, deploy/fabric/<name>), so they wait for core's wg0
   lobby:
@@ -141,6 +184,8 @@ services:
     <<: *edge
     environment:
       <<: *edge-env
+      BLOCKS_EDGE_NAME: edge-1
+      BLOCKS_EDGE_ADDRESS: 127.0.0.1:${BLOCKS_EDGE1_PORT:-25501}
       BLOCKS_E2E_AGENT_PORT: "8765" # velocity/e2e-agent (dev only), published for edge 1
     volumes: ["./build/stage/edge-1:/srv:Z", "./build/wireguard/edge-1:/etc/wireguard:ro,Z"]
     ports:
@@ -148,13 +193,21 @@ services:
       - "127.0.0.1:${BLOCKS_VELOCITY_AGENT_PORT:-28500}:8765"
   edge-2:
     <<: *edge
-    environment: *edge-env
+    environment:
+      <<: *edge-env
+      BLOCKS_EDGE_NAME: edge-2
+      # players' address of this edge (edge 3: its filter), where other edges transfer drained players
+      BLOCKS_EDGE_ADDRESS: 127.0.0.1:${BLOCKS_EDGE2_PORT:-25502}
     volumes: ["./build/stage/edge-2:/srv:Z", "./build/wireguard/edge-2:/etc/wireguard:ro,Z"]
     ports: ["127.0.0.1:${BLOCKS_EDGE2_PORT:-25502}:25565"]
   edge-3:
     # behind edge-3-filter (haproxy-protocol = true); not published itself
     <<: *edge
-    environment: *edge-env
+    environment:
+      <<: *edge-env
+      BLOCKS_EDGE_NAME: edge-3
+      # players' address of this edge (edge 3: its filter), where other edges transfer drained players
+      BLOCKS_EDGE_ADDRESS: 127.0.0.1:${BLOCKS_EDGE3_PORT:-25503}
     volumes: ["./build/stage/edge-3:/srv:Z", "./build/wireguard/edge-3:/etc/wireguard:ro,Z"]
   edge-3-filter:
     # stands in for an L4 DDoS filter: PROXY protocol v2 to edge 3

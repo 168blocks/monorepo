@@ -18,15 +18,18 @@ include(":libs:pgecs-ksp") // KSP processor: pgecs query infix relations and wri
 include(":libs:pgecs-lambda") // bytecode decompiler for pgecs query lambdas (where, select, orderBy, ...)
 include(":libs:pgecs-query") // pgecs query engine: planner, eqsat optimisation, SQL compiler, plan cache
 include(":libs:static-guard") // finds and contains static state shared by instances co-hosted in one JVM (#6)
+include(":libs:vodozemac-endive") // vodozemac (Matrix E2EE) as wasm on Endive, for the backend's Trixnity
 include(":libs:b8-util") // b8 modules on pgecs systems: expiry
 include(":libs:api") // Kotlin Multiplatform backend API model, shared with the frontend
 
 // Services
 include(":backend") // Ktor
 include(":frontend") // Compose Multiplatform (web + desktop)
+include(":dns") // player DNS: PowerDNS remote backend on the edges in pgecs (docs/dns.md)
 
 // Velocity plugins
 include(":velocity:example-plugin") // Velocity plugin
+include(":velocity:network") // every edge: online players, cross-edge actions, drain, maintenance
 include(":velocity:e2e-agent") // dev only: proxy state over HTTP for the e2e tests
 
 // Network
