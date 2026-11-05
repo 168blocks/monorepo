@@ -35,7 +35,7 @@ stage() {
   ./gradlew --console=plain -q :deploy:stage "-PacceptMinecraftEula=$eula"
   # Nix-built images (flake.nix), tagged by Nix with a content hash; loaded once per version
   local name image ref
-  for name in runtime postgres; do
+  for name in runtime postgres pdns; do
     image=$(nix build --no-link --print-out-paths ".#$name-image")
     ref=$(tar -xzOf "$image" manifest.json | jq -r '.[0].RepoTags[0]')
     podman image exists "$ref" || podman load -q -i "$image"
@@ -64,7 +64,7 @@ case "$cmd" in
   up)
     stage
     compose_up "$@"
-    echo "network $BLOCKS_COMPOSE_PROJECT: edges 127.0.0.1:$BLOCKS_EDGE1_PORT-$BLOCKS_EDGE3_PORT, backend $BLOCKS_E2E_BACKEND"
+    echo "network $BLOCKS_COMPOSE_PROJECT: edges 127.0.0.1:$BLOCKS_EDGE1_PORT-$BLOCKS_EDGE3_PORT, backend $BLOCKS_E2E_BACKEND, DNS $BLOCKS_E2E_DNS"
     ;;
   test)
     stage

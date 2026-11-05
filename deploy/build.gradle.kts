@@ -301,8 +301,15 @@ val stageBackend = tasks.register<Sync>("stageBackend") {
     from(project(":frontend").tasks.named("webDist")) { into("web") }
 }
 
+// player DNS service (dns/, docs/dns.md) with the local zone's config
+val stageDns = tasks.register<Sync>("stageDns") {
+    into(stageDir.map { it.dir("dns") })
+    from(project(":dns").tasks.named("installDist"))
+    from("dns/dns.conf")
+}
+
 tasks.register("stage") {
     group = "deploy"
     description = "Stages the compose network into deploy/build/stage"
-    dependsOn(stageEdges, stageLobby, stageSurvival, stageBackend, stageNetworkSchema, wireguard)
+    dependsOn(stageEdges, stageLobby, stageSurvival, stageBackend, stageNetworkSchema, stageDns, wireguard)
 }
