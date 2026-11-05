@@ -68,7 +68,8 @@ What keeps them apart:
   slot sets the compose project (`blocks168-<slot>`, so containers, networks and volumes are
   separate) and every host port: edges `25501-25503 + 10·slot`, backend `8080 + 10·slot`,
   S3 `8333 + 10·slot`, `gradlew runServer` `25565 + 10·slot`, and
-  the e2e agents (velocity, lobby, survival) `28500-28502 + 10·slot`.
+  the e2e agents (velocity, lobby, survival) `28500-28502 + 10·slot`, player DNS (UDP and TCP)
+  `10053 + 10·slot`.
   The end-to-end tests read the same values (`BLOCKS_E2E_*`). Slots of deleted checkouts are
   reclaimed; force one with `BLOCKS_INSTANCE_SLOT=<n>`.
 * **Images** built by Nix are tagged with their store hash, never `latest`, so worktrees on different
@@ -127,12 +128,13 @@ PaperMC, Fabric meta and Modrinth. Details: issue #8.
 | `libs/pgecs-eqsat` | Equality saturation for the pgecs planner: egglog (Rust, `egglog-wasi/`) built to wasm32-wasip1 by Nix (`nix/egglog-wasm.nix`), compiled at build time by Endive to native code (Redline, `nix/egglog-redline.nix`, slow, cached by Nix) and to JVM classes (fallback) |
 | `libs/api` | Kotlin Multiplatform (JVM + Wasm) backend API model, shared with the frontend |
 | `backend/` | Ktor backend; serves the API and the web frontend |
+| `dns/` | Player DNS: PowerDNS remote backend (Ktor) answering from the edges in PostgreSQL (`docs/dns.md`) |
 | `frontend/` | Compose Multiplatform frontend: web (Kotlin/Wasm) and desktop |
 | `mods/<name>` | Fabric mods (Minecraft 26.3, Loom without remapping, fabric-language-kotlin). `mods/example-common`: server + client; `mods/e2e-client`: dev-only client RPC for e2e tests |
 | `velocity/<name>` | Velocity plugins (Kotlin, fat jar via `pluginJar`) |
 | `deploy/` | podman compose network (`compose.yaml`, WireGuard peers in `wireguard/peers.toml`) and the Gradle tasks that stage it (`:deploy:stage`, `:deploy:wireguard`) |
 | `e2e/` | End-to-end tests against the running network |
-| `docs/` | `architecture.md`, `testing.md`, `pgecs.md` (pgecs design), `matrix-bot.md` (backend Matrix bot) |
+| `docs/` | `architecture.md`, `testing.md`, `pgecs.md` (pgecs design), `matrix-bot.md` (backend Matrix bot), `dns.md` (player DNS) |
 
 New module: add it to `settings.gradle.kts`, apply the matching convention plugin, and (for mods and
 plugins that run in the network) add it to `deploy/build.gradle.kts`.
