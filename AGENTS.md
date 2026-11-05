@@ -99,6 +99,7 @@ Do not hard-code ports, container or project names in new scripts or tests: take
 | --- | --- |
 | `build-logic/` | Convention plugins: `blocks.kotlin-jvm`, `blocks.kotlin-multiplatform`, `blocks.fabric-mod`, `blocks.velocity-plugin`, `blocks.repositories` |
 | `libs/pgecs` | ACID persistent ECS on PostgreSQL (backend, mods, Velocity plugins). Test fixture `TestPostgres` starts a throwaway server from Nix |
+| `libs/pgecs-optimizer` | Equality saturation for the pgecs planner: egglog (Rust, `egglog-wasi/`) built to wasm32-wasip1 by Nix (`nix/egglog-wasm.nix`), compiled to JVM classes by Endive at build time |
 | `libs/common` | JVM code shared by server-side components; CBOR via tinyjcbor (`ServerHello`) |
 | `libs/api` | Kotlin Multiplatform (JVM + Wasm) backend API model, shared with the frontend |
 | `backend/` | Ktor backend; serves the API and the web frontend |

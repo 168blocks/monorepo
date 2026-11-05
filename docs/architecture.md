@@ -28,7 +28,9 @@ pgecs). Java 25 is the minimum: Minecraft 26.3 and Velocity 4.3 require it.
 * **Backend**: Ktor (`backend/`); HTTP API (model in `libs/api`) and the web frontend.
 * **Frontend**: Compose Multiplatform (`frontend/`), web via Kotlin/Wasm, also a desktop build.
 * **PostgreSQL**: everything persistent, through **pgecs** (`libs/pgecs`), a fully ACID persistent
-  entity component system (prototype: connection only). Design: [`pgecs.md`](pgecs.md).
+  entity component system (prototype: connection only). Design: [`pgecs.md`](pgecs.md). Its query
+  planner will optimise with equality saturation: egglog compiled to Wasm and run on the JVM by Endive
+  (`libs/pgecs-optimizer`).
 * **S3-compatible object store**: backups and replays (SeaweedFS locally).
 
 ## Local network
