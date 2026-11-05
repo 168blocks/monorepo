@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "blocks168-e2e-client",
+  "version": "${version}",
+  "name": "168blocks E2E Client",
+  "description": "Development only: local JSON RPC to drive the client from end-to-end tests (connect, wait, input, screenshots). Never deployed.",
+  "authors": ["168blocks"],
+  "license": "proprietary",
+  "environment": "client",
+  "entrypoints": {
+    "client": [{ "adapter": "kotlin", "value": "net.blocks168.mod.e2e.client.E2eClient" }]
+  },
+  "mixins": ["blocks168-e2e-client.mixins.json"],
+  "depends": {
+    "fabricloader": ">=${fabricLoader}",
+    "fabric-api": "*",
+    "fabric-language-kotlin": ">=${fabricKotlin}",
+    "minecraft": "~${minecraft}",
+    "java": ">=${java}"
+  }
+}

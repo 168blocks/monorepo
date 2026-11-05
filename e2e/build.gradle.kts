@@ -22,6 +22,15 @@ tasks.named<Test>("test") {
     // the network is outside Gradle's view: never consider a run up to date
     outputs.upToDateWhen { false }
     outputs.cacheIf { false }
-    // the network's addresses (tools/instance.sh) and whether the Minecraft servers run (EULA)
-    System.getenv().filterKeys { it.startsWith("BLOCKS_E2E_") || it == "BLOCKS_ACCEPT_EULA" }.forEach { (k, v) -> environment(k, v) }
+    // the network's addresses (tools/instance.sh), whether the Minecraft servers run (EULA), the
+    // game client environment (flake.nix)
+    System.getenv().filterKeys { it.startsWith("BLOCKS_E2E_") || it in setOf("BLOCKS_ACCEPT_EULA", "BLOCKS_CLIENT_ENV", "BLOCKS_SWAY") }.forEach { (k, v) -> environment(k, v) }
+    // real game clients (net.blocks168.e2e.client): the dev client's launch description, run directories
+    if (e2e) {
+        dependsOn(":mods:e2e-client:clientLaunch")
+        environment("BLOCKS_E2E_CLIENT_LAUNCH", rootDir.resolve("mods/e2e-client/build/e2e-client/launch.json").absolutePath)
+        environment("BLOCKS_E2E_CLIENT_DIR", layout.buildDirectory.dir("e2e-clients").get().asFile.absolutePath)
+    }
+    // -PupdateScreenshots: (re)write the reference screenshots (src/test/screenshots) instead of comparing
+    if (providers.gradleProperty("updateScreenshots").isPresent) environment("BLOCKS_E2E_UPDATE_SCREENSHOTS", "true")
 }
