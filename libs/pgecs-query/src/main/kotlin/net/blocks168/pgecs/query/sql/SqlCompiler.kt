@@ -203,8 +203,10 @@ private class Rendering(private val stats: Stats, private val q: LogicalQuery) {
         }
         val conds = scans.flatMap { it.conditions() } + rest
         if (scans.isEmpty()) {
-            require(b.optionals.isEmpty()) { "optional groups need a scan to join to" }
-            return "(select 1) one" to conds
+            // only probes and filters: one row, kept or not by the `where`
+            val from = StringBuilder("(select 1) one")
+            for (o in b.optionals) optional(o, outer, null, from)
+            return from.toString() to conds
         }
         val order = JoinOrder.order(scans, conds, stats, outer)
         val where = mutableListOf<Pred>()
@@ -258,7 +260,8 @@ private class Rendering(private val stats: Stats, private val q: LogicalQuery) {
                 }
                 conds -= here.toSet()
                 val on = listOfNotNull(relCondition(s)) + here
-                inner.append(" join ").append(table(s)).append(" on ").append(on.joinToString(" and ") { pred(it) })
+                inner.append(" join ").append(table(s)).append(" on ")
+                    .append(if (on.isEmpty()) "true" else on.joinToString(" and ") { pred(it) })
             }
         }
         val outerOn = mutableListOf<Pred>()
@@ -373,6 +376,7 @@ private class Rendering(private val stats: Stats, private val q: LogicalQuery) {
         is Expr.Arith -> "(${expr(e.left)} ${e.op.sql} ${expr(e.right)})"
         is Expr.Aggregate -> aggregate(e)
         is Expr.Bool -> "coalesce(${pred(e.pred)}, false)"
+        is Expr.If -> "case when ${pred(e.condition)} then ${expr(e.then)} else ${expr(e.otherwise)} end"
     }
 
     private fun call(e: Expr.Call): String {
@@ -387,6 +391,7 @@ private class Rendering(private val stats: Stats, private val q: LogicalQuery) {
             Fn.CONTAINS -> "(strpos(${a[0]}, ${a[1]}) > 0)"
             Fn.ABS -> "abs(${a[0]})"
             Fn.COALESCE -> "coalesce(${a.joinToString(", ")})"
+            Fn.CONCAT -> "(${a.joinToString(" || ")})"
         }
     }
 

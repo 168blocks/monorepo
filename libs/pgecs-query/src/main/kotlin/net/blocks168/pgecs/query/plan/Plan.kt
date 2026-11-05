@@ -55,6 +55,7 @@ enum class Fn(val kind: Kind?) {
     CONTAINS(Kind.BOOLEAN),
     ABS(null),
     COALESCE(null),
+    CONCAT(Kind.STRING),
 }
 
 enum class ArithOp(val sql: String) { ADD("+"), SUB("-"), MUL("*"), DIV("/"), REM("%") }
@@ -155,6 +156,9 @@ sealed interface Expr {
     data object Now : Expr {
         override val kind: Kind get() = Kind.LONG
     }
+
+    /** `case when [condition] then [then] else [otherwise] end`. */
+    data class If(val condition: Pred, val then: Expr, val otherwise: Expr, override val kind: Kind?) : Expr
 
     /** A predicate used as a boolean value (in a projection). Kotlin semantics: never null. */
     data class Bool(val pred: Pred) : Expr {
@@ -307,6 +311,7 @@ fun containsAggregate(e: Expr): Boolean = when (e) {
     is Expr.Aggregate -> true
     is Expr.Call -> e.args.any(::containsAggregate)
     is Expr.Arith -> containsAggregate(e.left) || containsAggregate(e.right)
+    is Expr.If -> containsAggregate(e.then) || containsAggregate(e.otherwise)
     else -> false
 }
 
@@ -319,6 +324,7 @@ fun walk(e: Expr, f: (Expr) -> Unit) {
         is Expr.Aggregate -> e.arg?.let { walk(it, f) }
         is Expr.Bool -> walk(e.pred, f)
         is Expr.Cast -> walk(e.expr, f)
+        is Expr.If -> { walk(e.condition, f); walk(e.then, f); walk(e.otherwise, f) }
         else -> {}
     }
 }

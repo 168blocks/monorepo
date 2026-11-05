@@ -303,6 +303,7 @@ private class Lowerer(private val ir: QueryIr, private val nullParams: Set<Int>)
         is IrExpr.Arith -> mayBeNull(e.left, scope) || mayBeNull(e.right, scope)
         is IrExpr.Negate -> mayBeNull(e.operand, scope)
         is IrExpr.Call -> e.args.any { mayBeNull(it, scope) } || (e.type.nullable && e.args.isEmpty())
+        is IrExpr.If -> mayBeNull(e.then, scope) || mayBeNull(e.otherwise, scope)
         is IrExpr.Aggregate -> e.type.nullable
         is IrExpr.Arg -> true
     }
@@ -392,6 +393,7 @@ private class Lowerer(private val ir: QueryIr, private val nullParams: Set<Int>)
             Expr.Arith(ArithOp.SUB, Expr.Const(if (k == Kind.DOUBLE) 0.0 else 0L, k), expr(e.operand, scope), k)
         }
         is IrExpr.Call -> call(e, scope)
+        is IrExpr.If -> Expr.If(pred(e.condition, scope, positive = true), expr(e.then, scope), expr(e.otherwise, scope), Lowering.kindOf(e.type))
         is IrExpr.Aggregate -> Expr.Aggregate(
             when (e.fn) {
                 AggregateFn.COUNT -> AggFn.COUNT
@@ -417,6 +419,7 @@ private class Lowerer(private val ir: QueryIr, private val nullParams: Set<Int>)
             Functions.STARTS_WITH -> Fn.STARTS_WITH
             Functions.ENDS_WITH -> Fn.ENDS_WITH
             Functions.CONTAINS -> Fn.CONTAINS
+            Functions.CONCAT -> Fn.CONCAT
             Functions.NOW -> return Expr.Now
             else -> throw UnsupportedQueryException("function ${e.fn} cannot run in Postgres")
         }
