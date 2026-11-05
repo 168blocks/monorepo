@@ -30,3 +30,6 @@ tasks.withType<Test>().configureEach {
     jvmArgs("-XX:-DontCompileHugeMethods")
     maxHeapSize = "1g"
 }
+
+// pgecs is published apart from the b8 code (dev.vxcc.b8, gradle.properties)
+group = "dev.vxcc.alexs168"

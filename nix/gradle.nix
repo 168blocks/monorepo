@@ -167,7 +167,6 @@ in
     pname = "168blocks-libs";
     tasks = [
       ":libs:pgecs:jar"
-      ":libs:common:jar"
       ":libs:api:jvmJar"
     ];
     installPhase = "install -Dm644 -t $out libs/*/build/libs/*.jar";
