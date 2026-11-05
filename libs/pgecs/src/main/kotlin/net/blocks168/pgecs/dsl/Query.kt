@@ -74,6 +74,9 @@ class Query<R> internal constructor(
             ?: throw QueryResultException("count returned no number")
     }
 
+    /** This query with another IR of the same shape of columns and parameters (system batches add locks and limits). */
+    internal fun withIr(ir: QueryIr): Query<R> = Query(ir, params, shape, executor)
+
     override fun toString(): String = "Query($ir, params=$params)"
 }
 

@@ -1,5 +1,6 @@
 package net.blocks168.pgecs
 
+import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import net.blocks168.pgecs.db.Database
 import net.blocks168.pgecs.db.TxScope
@@ -9,12 +10,19 @@ import net.blocks168.pgecs.dsl.QueryResultException
 import net.blocks168.pgecs.dsl.Queryable
 import net.blocks168.pgecs.dsl.ResultMode
 import net.blocks168.pgecs.ir.QueryIr
+import net.blocks168.pgecs.ir.Canonical
+import net.blocks168.pgecs.query.HotShapes
 import net.blocks168.pgecs.query.QueryEngine
 import net.blocks168.pgecs.query.QueryEngineConfig
 import net.blocks168.pgecs.query.exec.ResultSizeException
 import net.blocks168.pgecs.query.sql.Mode
 import net.blocks168.pgecs.schema.Freeze
 import net.blocks168.pgecs.schema.FreezeReport
+import net.blocks168.pgecs.outbox.Outbox
+import net.blocks168.pgecs.outbox.OutboxConfig
+import net.blocks168.pgecs.system.SchedulerConfig
+import net.blocks168.pgecs.system.SystemComponent
+import net.blocks168.pgecs.system.Systems
 
 /**
  * The pgecs entry point: one Postgres database as the ECS (docs/pgecs.md, *Kotlin API sketch*).
@@ -33,9 +41,24 @@ class Ecs internal constructor(
     val database: Database,
     val engine: QueryEngine,
     private val ownsDatabase: Boolean,
+    /** This process: the owner of the leases it takes. Random unless configured. */
+    val processId: UUID,
+    schedulerConfig: SchedulerConfig,
+    outboxConfig: OutboxConfig = OutboxConfig(),
+    /** The process kind whose hot query shapes are recorded and pre-compiled; null turns that off. */
+    hotShapeKind: String? = null,
 ) : Queryable, AutoCloseable {
     /** The registered types; add more before [freeze]. */
     val registry = Registry()
+
+    /** In-transaction hooks (`onAdd`, `onSet`, `onRemove`); register them before running writes. */
+    val hooks = Hooks()
+
+    /** Scheduled systems and observers; register them after [freeze], then [Systems.start]. */
+    val systems: Systems = Systems(this, schedulerConfig)
+
+    /** Processes, endpoints and outbox delivery; see [Outbox]. */
+    val outbox: Outbox = Outbox(this, outboxConfig)
 
     @Volatile
     var freezeReport: FreezeReport? = null
@@ -51,7 +74,35 @@ class Ecs internal constructor(
         val report = Freeze(database).run(registry.specs())
         registry.freeze()
         freezeReport = report
+        hotShapes?.let(::startHotShapes)
         return report
+    }
+
+    /** Query shapes this process kind used, pre-compiled at freeze and recorded every few minutes. */
+    private val hotShapes: HotShapes? = hotShapeKind?.let { HotShapes(engine, it, Canonical::parse) }
+
+    @Volatile
+    private var hotShapeFlusher: Thread? = null
+
+    private fun startHotShapes(hot: HotShapes) {
+        runCatching { database.read("pgecs:hot-shapes") { hot.precompile(connection) } }
+            .onFailure { LOG.log(System.Logger.Level.WARNING, "could not pre-compile hot query shapes", it) }
+        hotShapeFlusher = Thread.ofVirtual().name("pgecs-hot-shapes").start {
+            while (true) {
+                try {
+                    Thread.sleep(HOT_SHAPE_FLUSH)
+                } catch (_: InterruptedException) {
+                    return@start
+                }
+                flushHotShapes()
+            }
+        }
+    }
+
+    private fun flushHotShapes() {
+        val hot = hotShapes ?: return
+        runCatching { database.tx("pgecs:hot-shapes") { hot.flush(connection) } }
+            .onFailure { LOG.log(System.Logger.Level.WARNING, "could not record hot query shapes", it) }
     }
 
     private fun checkFrozen() {
@@ -158,11 +209,23 @@ class Ecs internal constructor(
     }
 
     override fun close() {
+        outbox.close()
+        systems.close()
+        hotShapeFlusher?.let {
+            it.interrupt()
+            it.join(java.time.Duration.ofSeconds(5))
+            if (registry.frozen && !database.isClosed) flushHotShapes()
+        }
         engine.close()
         if (ownsDatabase) database.close()
     }
 
     override fun toString(): String = "Ecs($database, frozen=${registry.frozen})"
+
+    private companion object {
+        val LOG: System.Logger = System.getLogger(Ecs::class.java.name)
+        val HOT_SHAPE_FLUSH: java.time.Duration = java.time.Duration.ofMinutes(5)
+    }
 }
 
 /** How to create an [Ecs]. */
@@ -171,6 +234,19 @@ object Pgecs {
     class Options {
         /** The query engine's settings. */
         var engine: QueryEngineConfig = QueryEngineConfig()
+
+        /** The process id ([Ecs.processId]); stable ids from config make leases survive restarts. */
+        var processId: UUID = UUID.randomUUID()
+
+        var scheduler: SchedulerConfig = SchedulerConfig()
+
+        var outbox: OutboxConfig = OutboxConfig()
+
+        /**
+         * The kind of this process (`ktor-backend`, `fabric-lobby`), for hot query shapes: the shapes
+         * processes of one kind run most are recorded and compiled at the next freeze. Null: off.
+         */
+        var processKind: String? = null
 
         /** Whether to register every [PgecsModule] found by [java.util.ServiceLoader]. */
         var loadModules: Boolean = true
@@ -196,8 +272,9 @@ object Pgecs {
 
     private fun create(database: Database, ownsDatabase: Boolean, configure: Options.() -> Unit): Ecs {
         val options = Options().apply(configure)
-        val ecs = Ecs(database, QueryEngine(options.engine), ownsDatabase)
-        ecs.registry.register(ChildOf)
+        val ecs = Ecs(database, QueryEngine(options.engine), ownsDatabase, options.processId, options.scheduler, options.outbox, options.processKind)
+        ecs.registry.register(ChildOf, SystemComponent)
+        ecs.registry.register(Outbox.TYPES)
         if (options.loadModules) ecs.registry.registerModules()
         ecs.registry.register(options.types)
         return ecs

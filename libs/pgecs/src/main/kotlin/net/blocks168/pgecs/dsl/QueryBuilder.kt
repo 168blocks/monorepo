@@ -199,11 +199,20 @@ open class QueryBuilder internal constructor() {
         throw QueryBuildException(e.message ?: "untranslatable lambda", e)
     }
 
+    /** The IR of `select f(e[component])` for every `e` with [component] (index lambdas). */
+    internal fun valueFunction(component: Component<*>, f: java.io.Serializable): net.blocks168.pgecs.ir.QueryIr {
+        val e = entity("e") as QueryVariable
+        return Lowering(this).valueFunction(e, component, decompile(f))
+    }
+
     /** Lowers what was recorded into a validated query. */
     internal fun <R> build(executor: QueryExecutor?): Query<R> = Lowering(this).lower(executor)
 
     companion object {
         private val current = ThreadLocal<QueryBuilder?>()
+
+        /** A fresh builder for an index lambda. */
+        internal fun forIndex(): QueryBuilder = QueryBuilder()
 
         /**
          * The builder of the `query { }` block running on this thread: how generated infix functions

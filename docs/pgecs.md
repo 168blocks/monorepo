@@ -96,7 +96,8 @@ create table ecs_component_type (
   state            text not null check (state in ('pending', 'active', 'retired')),
   traits           jsonb not null default '{}',  -- exclusive, acyclic, symmetric, oneOf, cleanup
   json_schema      jsonb null,                   -- value kinds; checked via pg_jsonschema
-  fingerprint      text not null                 -- per component, compared at freeze
+  fingerprint      text not null,                -- per component, compared at freeze
+  rules            jsonb not null default '[]'   -- validate { } rules as SQL (base schema V4)
 );
 
 -- All component data.
@@ -121,6 +122,7 @@ create index ecs_c_target on ecs_component (target, rel, entity)
 - **Serializable only.** Setup runs `ALTER DATABASE … SET default_transaction_isolation = 'serializable'`. The core trigger on `ecs_component` and `ecs_entity` also rejects any write where `current_setting('transaction_isolation') <> 'serializable'`. Postgres' guarantee only holds among serializable transactions, so this keeps every trigger-based invariant safe, even against a hand-written SQL session.
 - **Reserved entities.** A `BEFORE DELETE` trigger on `ecs_entity` refuses to delete the nil entity, ever. It also refuses component, relation and capability entities, always: retiring a component keeps its entity and catalog row (state `retired`) and deletes its rows instead, so a retired name can never be reused. Without this, one delete of the nil entity would cascade through every plain component in the database.
 - **Kinds and schemas.** The core trigger checks `kind` (tags have null values, value components do not, relations have a target), refuses writes to `pending` or `retired` components, and rejects any value where `jsonb_matches_schema(json_schema, value)` is false.
+- **Validation rules.** A second row trigger evaluates the component's `validate { }` rules (`ecs_component_type.rules`, SQL rendered by the query compiler) on every value written.
 - **Traits.** Exclusive is a partial unique index on `(entity)`. pgecs replaces the old pair in the same tx before inserting a new one, as flecs does. Acyclic, Symmetric and OneOf are triggers. Cleanup `remove` is the FK cascade. `delete` (as for `child-of`) and `panic` are a `BEFORE DELETE` trigger on `ecs_entity`.
 - **Entity version.** Every component write bumps `ecs_entity.version`, so two transactions touching one entity always conflict instead of interleaving. That makes busy entities (accounts, process entities) hot rows; see the contention guidance.
 
@@ -200,8 +202,10 @@ The Postgres side lives in `libs/pgecs`: `net.blocks168.pgecs.db` (connection po
 
 `net.blocks168.pgecs.Ecs` ties the layers together (`Pgecs.connect(config)` or `Pgecs.on(database)`):
 
-- **Registry.** `pgecs-ksp` generates one `PgecsModule` per Gradle module, listing its `Component`, `Tag`, `Relation` and `Capability` objects, with a `META-INF/services` entry; `Pgecs.connect` loads them with `ServiceLoader` (`Options.register` adds more, `loadModules = false` turns the lookup off). `ComponentType.toSpec()` turns a handle into a `ComponentSpec`: relation traits from the `Relation` constructor, JSON Schema from the serializer's descriptor (`JsonSchemas`, with `@Pattern`, `@MinLength`, `@MaxLength`, `@Min`, `@Max`, `@Format`), indexes from `index(IndexSpec)` in the component's `init`. Kotlin-only rules are `validate("description") { ... }` and run before a write is buffered. `ecs.freeze()` runs freeze and makes the registry read-only; transactions and queries throw before it, and unregistered handles throw after it.
+- **Registry.** `pgecs-ksp` generates one `PgecsModule` per Gradle module, listing its `Component`, `Tag`, `Relation` and `Capability` objects, with a `META-INF/services` entry; `Pgecs.connect` loads them with `ServiceLoader` (`Options.register` adds more, `loadModules = false` turns the lookup off). `ComponentType.toSpec()` turns a handle into a `ComponentSpec`: relation traits from the `Relation` constructor, JSON Schema from the serializer's descriptor (`JsonSchemas`, with `@Pattern`, `@MinLength`, `@MaxLength`, `@Min`, `@Max`, `@Format`), indexes from `unique { it.address.lowercase() }` and `index { it }` in the component's `init` (decompiled, lowered and rendered by `SqlCompiler.rowExpression`, the same rendering queries get, so the matching predicate uses the index) or from a raw `index(IndexSpec)`. Rules are `validate("description") { ... }`: rendered to SQL the same way, stored in `ecs_component_type.rules` (base schema V4) and checked by the `ecs_component_11_rules` trigger on every write (`EC011`), so writes that bypass Kotlin are checked too. A rule passes exactly the values `where { rule }` matches. Freeze fails with a pointer to `kotlinOnly = true` when a rule cannot be rendered. Every rule also runs in Kotlin before a write is buffered (`ComponentValidationException`). Rules are additive: freeze checks stored values against a new rule, an older process leaves newer rules in place, and changing or dropping a rule needs a new component version. `ecs.freeze()` runs freeze and makes the registry read-only; transactions and queries throw before it, and unregistered handles throw after it.
 - **Writes.** `ecs.tx { }` hands an `EcsTx`: `create { }` (client-side UUIDv7), `create(id) { }`, `ensure(id) { }`, `update(e) { }`, `delete(e)`, and the reads of `EcsRead` (`get`, `has`, `targets`, `target`, `exists`, `query { }`). Writes are buffered per transaction (one buffer shared by nested `tx { }`), collapsed per `(entity, rel, target)`, and flushed before every read or query and at commit: new entities first, then per entity sorted by id, then deletes. An exclusive pair replaces the others in the same flush. Writes that change nothing are skipped, so they neither bump the entity version nor log a change. Object values are merged at the top level with the stored value (`stored || new`, only while the sealed discriminator `@type` is unchanged), so fields written by a newer JVM survive; values whose root is not an object (maps, lists, scalars) are replaced. A failed `savepoint { }` drops what was buffered inside it.
+- **Hooks.** `ecs.hooks.onAdd(type) { event -> }`, `onSet(component) { entity, value -> }` and `onRemove(type) { event -> }` run in the writing transaction, when the write is buffered. They fire only for writes made through `create { }` / `update(e) { }`, never for cascades. A component with add or remove hooks costs one read per write, which tells an add from a set.
+- **Hot shapes.** With `Options.processKind` set, freeze pre-compiles the shapes that processes of that kind used most (`ecs_query_shape`), and the counts are recorded every 5 minutes and at `close()`.
 - **Queries.** `Ecs` is the DSL's `Queryable`: its `QueryExecutor` runs the IR on `libs/pgecs-query`'s `QueryEngine` in the current transaction, after flushing its writes; outside a transaction a query opens a read-only one of its own.
 
 ### kotlinx.serialization integration
@@ -320,6 +324,16 @@ update ecs_component o
 - Delivery is at least once. Handlers must be idempotent, using `idempotencyKey`. After the configured number of attempts, the entry gets `pgecs:outbox-dead` and stays for inspection.
 - An entry targeted at an endpoint that is down waits until it returns. An optional deadline turns it dead instead.
 - If a player moved between enqueue and execution, the handler re-reads presence and re-enqueues to the new endpoint in the same `tx` that completes the old entry.
+
+### Implementation (outbox)
+
+`net.blocks168.pgecs.outbox`, reached as `ecs.outbox`:
+
+- `ecs.outbox.process(id, name, kind)` takes `pg_try_advisory_lock(Outbox.lockKey(id))` (most significant bits xor least) on a dedicated connection and `LISTEN`s on `pgecs_outbox` there. It refuses to start (`ProcessAlreadyRunningException`) when another JVM holds the lock. `isAlive(id)` reads `pg_locks`.
+- `process.endpoint(id, name) { handles(Cap) { payload -> ... } }` makes the endpoint a child of the process and rewrites its `(pgecs:can, <capability>)` pairs from the handlers. Entries targeted at it whose capability it lost are dead-lettered in the same transaction.
+- `outbox(Cap, payload, to = endpoint, idempotencyKey, notBefore, deadline)` inside `tx { }` writes the entry. Base schema V3 checks it at commit (deferred constraint trigger, so the order of the entry's rows does not matter): the capability exists, the payload matches its schema, and a target endpoint can handle it (`EC010`). It also notifies `pgecs_outbox` with the capability name.
+- `start()` runs one delivery loop per endpoint, woken by notifications or every `poll`. A claim is one statement with `for update of c skip locked` that counts the attempt and sets `claimedBy` / `leaseUntil`. Handlers run outside any transaction. Success deletes the entry if the claim is still ours; failure clears the claim and backs off. After `maxAttempts`, or past its `deadline` (system `pgecs:outbox-deadlines`), the entry gets `pgecs:outbox-dead`.
+- Player presence (`b8:mc:online-on`) and `to = onlineOn(player)` belong to the Minecraft side (`pgecs-fabric`) and are not implemented yet.
 
 ## Query language and SQL compiler
 
@@ -565,15 +579,11 @@ Expiry always deletes the entity that expires. Anything that should expire on it
 - A temporary ban is not a tag on the account. It is a `b8:mod:ban:v1` entity with an expiry component and `(pgecs:child-of, <account>)`. Whether an account is banned is a query (`has a ban child`), and the ban entity can carry its reason, issuer and dates.
 
 ```kotlin
-ecs.system("b8:util:expire-slow") {
-    every(5.minutes)
-    query {
-        val e by entity
-        e has ExpiresSlowComponent.where { it < now() }
-        orderBy { e[ExpiresSlowComponent] }
-    }
-    batch(500) { rows -> rows.forEach { delete(it[e]) } }
-}
+ecs.systems.system("b8:util:expire-slow", Duration.ofMinutes(5), batchSize = 500, {
+    val e by entity
+    e has ExpiresSlowComponent.where { it < now() }
+    select { e }
+}) { rows -> rows.forEach { delete(it) } }
 ```
 
 `now()` is a parameter bound at each execution, never a constant baked into a cached plan. Deleting runs the normal cleanup policies, so the entity's children go too.
@@ -599,16 +609,23 @@ The change trigger records every delete, including rows removed by cascades, so 
 3. **React.** pgecs groups the changes per entity and transaction and hands the observer a `Removed` view of the entity as it was. The observer runs in its own `SERIALIZABLE` tx. It may only write to the database, typically outbox entries, and it advances its cursor in that same tx. Database effects therefore happen exactly once, and external effects at least once through the outbox.
 
 ```kotlin
-ecs.observer("b8:mod:notify-ban-ended") {
-    onRemove(BanComponent)
-    batch(100) { removed ->
-        removed.forEach { ban ->
-            val account = ban.old[ChildOf] ?: return@forEach
-            outbox(Message.toAccount(account, "Your ban has ended"))
-        }
+ecs.systems.observer("b8:mod:notify-ban-ended", Observe.removed(BanComponent), batchSize = 100) { removed ->
+    removed.forEach { ban ->
+        val account = ban.old[ChildOf] ?: return@forEach
+        outbox(Message.toAccount(account, "Your ban has ended"))
     }
 }
 ```
+
+### Implementation (systems)
+
+`net.blocks168.pgecs.system.Systems`, reached as `ecs.systems` (register after `freeze()`, then `start()`; tests drive one step with `runOnce(name)`):
+
+- **Rows.** Each system is the entity UUIDv5(`pgecs:system:<name>`) with `pgecs:system:v1 = {name, kind, nextRun, leaseOwner, leaseUntil, cursorXid, cursorEntity}`, created with `on conflict do nothing` so a second process never resets it. Times are the database clock (epoch millis); the lease owner is `Ecs.processId`. Base schema V2 keeps `pgecs:system:v1` out of `ecs_change`, like the outbox.
+- **Periodic** (`system(name, every, batchSize, query, action)`, or `task(name, every, action)` without a query): one `update ... returning` claims the lease when the run is due and the lease is free. The leader runs batches, renewing the lease after half of it, and sets `nextRun` and clears the lease at the end. A process that finds the lease held by another joins as a helper. A batch is the query with `limit n` and `for update of <its first component match> skip locked`, in one transaction with the action. A run stops after `maxBatchesPerRun` batches, in case an action leaves its rows matching.
+- **Observers** (`observer(name, Observe.removed(C), ..., action)`): one leased process per observer. A batch transaction checks the lease and reads up to `batchSize` groups `(xid, entity)` after the cursor with `xid < pg_snapshot_xmin(pg_current_snapshot())`. It hands them to the action as `EntityChange`s (`added`, `removed`, `updated`, `old[Component]`, `old[ExclusiveRelation]`, `old.targets`, `old.had(tag)`) and advances the cursor in the same transaction. A new observer starts at the current `xmin`, not at the start of the log. An idle observer moves its cursor up to `xmin` once a minute, so retention is not held back.
+- **Retention.** `start()` installs `pgecs:change-retention` (hourly). It deletes change rows older than `changeRetention` (7 days) whose xid is below every observer's cursor.
+- **Expiry** is `libs/b8-util` (`Expiry.install(ecs)`, `ExpiresSlowComponent`, `ExpiresFastComponent`, `notExpired(e)`), with an index on exactly the SQL the compiler renders for `it < now()`.
 
 ## Kotlin API sketch
 

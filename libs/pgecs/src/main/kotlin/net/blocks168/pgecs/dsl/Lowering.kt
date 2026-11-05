@@ -26,6 +26,7 @@ import net.blocks168.pgecs.ir.EntityVar
 import net.blocks168.pgecs.ir.Expr
 import net.blocks168.pgecs.ir.Functions
 import net.blocks168.pgecs.ir.IrBuilder
+import net.blocks168.pgecs.ir.QueryIr
 import net.blocks168.pgecs.ir.TermsBuilder
 import net.blocks168.pgecs.ir.ValueType
 import net.blocks168.pgecs.ir.ValueVar
@@ -81,6 +82,26 @@ internal class Lowering(private val q: QueryBuilder) {
             throw QueryBuildException("invalid query: ${e.message}", e)
         }
         return Query(ir, params.toList(), shape, executor)
+    }
+
+    /**
+     * `select f(e[component])` over every entity [subject] with [component]: how `index { }` and
+     * `unique { }` lambdas reach the SQL compiler, which renders the indexed expression exactly as it
+     * renders the same expression in a query. Captured values are refused (an index is fixed).
+     */
+    fun valueFunction(subject: QueryVariable, component: Component<*>, f: LambdaInstance): QueryIr {
+        for (v in q.variables) entityVars[v] = b.entity(uniqueName(v.name))
+        val binding = bind(b, subject, component, optional = false)
+        val e = asExpr(lowerLambda(f, listOf(valueOf(binding))), f)
+        if (params.isNotEmpty()) {
+            throw QueryBuildException("${component.name}: index and unique lambdas cannot use captured values (${f.decompiled.location})")
+        }
+        b.select("indexed", e)
+        return try {
+            b.build()
+        } catch (e: IllegalArgumentException) {
+            throw QueryBuildException("invalid index expression: ${e.message}", e)
+        }
     }
 
     // ---- names and parameters ----
@@ -330,6 +351,10 @@ internal class Lowering(private val q: QueryBuilder) {
         is LV.Obj -> objExpr(lv, ctx)
     }
 
+    /** How kotlinx.serialization stores [e]: its `@SerialName`, else its name. */
+    private fun serialName(e: Enum<*>): String =
+        e.declaringJavaClass.getField(e.name).getAnnotation(kotlinx.serialization.SerialName::class.java)?.value ?: e.name
+
     /** A JVM value as a parameter (captured) or literal (constant). */
     private fun objExpr(o: LV.Obj, ctx: Ctx): Expr {
         val v = o.value
@@ -339,7 +364,7 @@ internal class Lowering(private val q: QueryBuilder) {
         }
         val (type, value) = when (v) {
             is EntityId -> ValueType.UUID to v.id
-            is Enum<*> -> ValueType.TEXT to v.name
+            is Enum<*> -> ValueType.TEXT to serialName(v)
             is Char -> ValueType.TEXT to v.toString()
             is String -> ValueType.TEXT to v
             is Boolean -> ValueType.BOOL to v
@@ -446,6 +471,15 @@ internal class Lowering(private val q: QueryBuilder) {
         else -> null
     }
 
+    /** A `Char` argument (`contains(' ')`): the compiler passes a constant as an int, a captured one as a Char. */
+    private fun charArg(lv: LV, ctx: Ctx): Expr? = when {
+        lv is LV.E && lv.expr is Expr.Literal && (lv.expr as Expr.Literal).value is Number ->
+            Expr.Literal(((lv.expr as Expr.Literal).value as Number).toInt().toChar().toString(), ValueType.TEXT)
+        lv is LV.Obj && lv.value is Number && !lv.captured -> Expr.Literal((lv.value as Number).toInt().toChar().toString(), ValueType.TEXT)
+        lv is LV.Obj && lv.value is Char -> objExpr(lv, ctx)
+        else -> textArg(lv, ctx)
+    }
+
     private fun isFalse(lv: LV): Boolean =
         lv is LV.E && lv.expr == Expr.Literal(false, ValueType.BOOL)
 
@@ -482,7 +516,8 @@ internal class Lowering(private val q: QueryBuilder) {
             }
             // (s, other, ignoreCase[, mask, marker]): only the case-sensitive form translates
             if (args.size < 3 || !isFalse(args[2])) fail(ctx, "${c.name.removeSuffix("\$default")} with ignoreCase is not translatable")
-            val other = textArg(args[1], ctx) ?: return null
+            val other = (if (c.descriptor.startsWith("(Ljava/lang/CharSequence;C")) charArg(args[1], ctx) else textArg(args[1], ctx))
+                ?: return null
             return LV.E(Functions.call(fn, s, other))
         }
         return null

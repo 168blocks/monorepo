@@ -165,45 +165,70 @@ internal class EcsTxImpl(ecs: Ecs, scope: TxScope, private val buffer: WriteBuff
         }
     }
 
+    private val hooks get() = ecs.hooks
+
     private inner class Writer(override val entity: EntityId) : EntityWriter {
         private val id get() = entity.id
+        private val tx get() = this@EcsTxImpl
+
+        private fun present(type: ComponentType, target: EntityId? = null): Boolean =
+            if (target == null) tx.has(entity, type) else tx.has(entity, type as Relation, target)
 
         override fun <T> set(component: Component<T>, value: T?) {
             ecs.registry.require(component)
+            val watch = hooks.watchesPresence(component)
+            val before = watch && present(component)
             if (value == null) {
                 buffer.remove(id, component.name, WriteBuffer.NIL)
+                if (before) hooks.removed(tx, HookEvent(entity, component, null))
                 return
             }
             component.check(value)
             buffer.set(id, component.name, WriteBuffer.NIL, Values.encode(component, value), merge = component.mergesOnWrite, exclusive = false)
+            if (watch && !before) hooks.added(tx, HookEvent(entity, component, null))
+            hooks.set(tx, entity, component, value)
         }
 
-        override fun <T> get(component: Component<T>): T? = this@EcsTxImpl.get(entity, component)
+        override fun <T> get(component: Component<T>): T? = tx.get(entity, component)
 
         override fun add(tag: Tag) {
             ecs.registry.require(tag)
+            val watch = hooks.watchesPresence(tag)
+            val before = watch && present(tag)
             buffer.set(id, tag.name, WriteBuffer.NIL, null, merge = false, exclusive = false)
+            if (watch && !before) hooks.added(tx, HookEvent(entity, tag, null))
         }
 
         override fun remove(tag: Tag) {
             ecs.registry.require(tag)
+            val before = hooks.watchesPresence(tag) && present(tag)
             buffer.remove(id, tag.name, WriteBuffer.NIL)
+            if (before) hooks.removed(tx, HookEvent(entity, tag, null))
         }
 
         override fun add(relation: Relation, target: EntityId) {
             ecs.registry.require(relation)
             require(!target.isVariable) { "the target of a pair must be a real entity, not a query variable" }
+            val watch = hooks.watchesPresence(relation)
+            val old = if (watch) tx.targets(entity, relation) else emptyList()
             buffer.set(id, relation.name, target.id, null, merge = false, exclusive = relation.exclusive)
+            if (!watch) return
+            if (relation.exclusive) old.filter { it != target }.forEach { hooks.removed(tx, HookEvent(entity, relation, it)) }
+            if (target !in old) hooks.added(tx, HookEvent(entity, relation, target))
         }
 
         override fun remove(relation: Relation, target: EntityId) {
             ecs.registry.require(relation)
+            val before = hooks.watchesPresence(relation) && present(relation, target)
             buffer.remove(id, relation.name, target.id)
+            if (before) hooks.removed(tx, HookEvent(entity, relation, target))
         }
 
         override fun removeAll(relation: Relation) {
             ecs.registry.require(relation)
+            val old = if (hooks.watchesPresence(relation)) tx.targets(entity, relation) else emptyList()
             buffer.removeAll(id, relation.name)
+            old.forEach { hooks.removed(tx, HookEvent(entity, relation, it)) }
         }
     }
 }
